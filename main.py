@@ -7,7 +7,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from NIKALLLLLLL import (setreply,eletereply,istreplies )
+from Bot import (setreply,eletereply,istreplies )
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 BOT_USERNAME = os.environ.get("BOT_USERNAME")
