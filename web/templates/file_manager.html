@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html>
+<head><title>File Manager</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body>
+<h1>File Manager</h1>
+<ul>{% for file in files %}<li>{{ file }}</li>{% endfor %}</ul>
+<!-- Add forms for edit, delete, upload -->
+</body>
+</html>
