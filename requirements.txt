@@ -1,0 +1,6 @@
+pyrogram
+flask
+aiofiles
+psutil
+python-dotenv
+requests
