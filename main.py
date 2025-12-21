@@ -24,7 +24,7 @@ from NIKALLLLLLL import (
 # ================= CONFIG =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
-PORT = int(os.environ.get("PORT", "8080"))
+PORT = int(os.environ.get("PORT", "10000"))
 
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
