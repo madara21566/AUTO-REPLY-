@@ -8,23 +8,22 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters
 )
 
-# ✅ CONFIGURATION
+# ================= CONFIG =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-BOT_USERNAME = os.environ.get("BOT_USERNAME")
-OWNER_ID = 7640327597  # Error logs ke liye rakha gaya hai
-
+OWNER_ID = 7640327597
 BOT_START_TIME = datetime.utcnow()
 
-# ✅ DEFAULTS
+# ================= DEFAULTS =================
 default_vcf_name = "Contacts"
 default_contact_name = "Contact"
 default_limit = 100
 
-# ✅ USER SETTINGS
+# ================= USER DATA =================
 user_file_names = {}
 user_contact_names = {}
 user_limits = {}
@@ -33,321 +32,251 @@ user_vcf_start_numbers = {}
 user_country_codes = {}
 user_group_start_numbers = {}
 merge_data = {}
-conversion_mode = {}  # 🔥 for txt2vcf / vcf2txt
+conversion_mode = {}
+user_input_state = {}
 
-# ✅ ERROR HANDLER
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    error_text = "".join(traceback.format_exception(None, context.error, context.error.__traceback__))
+# ================= ERROR HANDLER =================
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    err = "".join(traceback.format_exception(None, context.error, context.error.__traceback__))
     with open("bot_errors.log", "a") as f:
-        f.write(f"{datetime.utcnow()} - {error_text}\n\n")
+        f.write(err)
     try:
-        # Error alert sirf owner ko jayega
-        await context.bot.send_message(chat_id=OWNER_ID, text=f"⚠️ Bot Error Alert ⚠️\n\n{error_text[:4000]}")
-    except Exception:
+        await context.bot.send_message(OWNER_ID, f"⚠️ ERROR:\n{err[:4000]}")
+    except:
         pass
 
-# ✅ HELPERS
-def generate_vcf(numbers, filename="Contacts", contact_name="Contact", start_index=None, country_code="", group_num=None):
-    vcf_data = ""
-    for i, num in enumerate(numbers, start=(start_index if start_index else 1)):
-        if group_num:
-            name = f"{contact_name}{str(i).zfill(3)} (Group {group_num})"
-        else:
-            name = f"{contact_name}{str(i).zfill(3)}"
-        formatted_num = f"{country_code}{num}" if country_code else num
-        vcf_data += f"BEGIN:VCARD\nVERSION:3.0\nFN:{name}\nTEL;TYPE=CELL:{formatted_num}\nEND:VCARD\n"
-    vcf_filename = f"{filename}.vcf"
-    with open(vcf_filename, "w") as f:
-        f.write(vcf_data)
-    return vcf_filename
+# ================= HELPERS =================
+def generate_vcf(numbers, filename="Contacts", cname="Contact",
+                 start_index=None, cc="", group=None):
+    data = ""
+    for i, num in enumerate(numbers, start=start_index or 1):
+        name = f"{cname}{str(i).zfill(3)}"
+        if group:
+            name += f" (Group {group})"
+        num = f"{cc}{num}" if cc else num
+        data += f"BEGIN:VCARD\nVERSION:3.0\nFN:{name}\nTEL:{num}\nEND:VCARD\n"
+    path = f"{filename}.vcf"
+    with open(path, "w") as f:
+        f.write(data)
+    return path
 
-def extract_numbers_from_vcf(file_path):
-    numbers = set()
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        content = f.read()
-    for card in content.split('END:VCARD'):
-        if 'TEL' in card:
-            tel_lines = [line for line in card.splitlines() if line.startswith('TEL')]
-            for line in tel_lines:
-                number = re.sub(r'[^0-9]', '', line.split(':')[-1].strip())
-                if number:
-                    numbers.add(number)
-    return numbers
-
-def extract_numbers_from_txt(file_path):
-    numbers = set()
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+def extract_numbers_from_vcf(path):
+    nums = set()
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
-            nums = re.findall(r'\d{7,}', line)
-            numbers.update(nums)
-    return numbers
+            if line.startswith("TEL"):
+                nums.add(re.sub(r"\D", "", line))
+    return nums
 
-# ✅ TXT2VCF & VCF2TXT
-async def txt2vcf(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conversion_mode[update.effective_user.id] = "txt2vcf"
-    if context.args:
-        conversion_mode[f"{update.effective_user.id}_name"] = "_".join(context.args)
-    await update.message.reply_text("📂 Send me a TXT file, I’ll convert it into VCF.")
+def extract_numbers_from_txt(path):
+    nums = set()
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            nums.update(re.findall(r"\d{7,}", line))
+    return nums
 
-async def vcf2txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    conversion_mode[update.effective_user.id] = "vcf2txt"
-    if context.args:
-        conversion_mode[f"{update.effective_user.id}_name"] = "_".join(context.args)
-    await update.message.reply_text("📂 Send me a VCF file, I’ll extract numbers into TXT.")
-
-# ✅ START
+# ================= START MENU =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uptime_duration = datetime.utcnow() - BOT_START_TIME
-    days = uptime_duration.days
-    hours, rem = divmod(uptime_duration.seconds, 3600)
-    minutes, seconds = divmod(rem, 60)
+    keyboard = [
+        [InlineKeyboardButton("📂 Filename", callback_data="filename"),
+         InlineKeyboardButton("👤 Contact", callback_data="contact")],
+        [InlineKeyboardButton("📊 Limit", callback_data="limit"),
+         InlineKeyboardButton("🔢 Start No.", callback_data="startnum")],
+        [InlineKeyboardButton("📄 VCF Start", callback_data="vcfstart"),
+         InlineKeyboardButton("🌍 Country Code", callback_data="cc")],
+        [InlineKeyboardButton("📑 Group", callback_data="group"),
+         InlineKeyboardButton("🛠 Make VCF", callback_data="makevcf")],
+        [InlineKeyboardButton("🔀 Merge", callback_data="merge"),
+         InlineKeyboardButton("✅ Done", callback_data="done")],
+        [InlineKeyboardButton("📝 TXT → VCF", callback_data="txt2vcf"),
+         InlineKeyboardButton("📄 VCF → TXT", callback_data="vcf2txt")],
+        [InlineKeyboardButton("⚙️ My Settings", callback_data="mysettings"),
+         InlineKeyboardButton("♻️ Reset", callback_data="reset")]
+    ]
 
-    help_text = (
-        "☠️ Welcome to the VCF Bot!☠️\n\n"
-        f"🤖 Uptime: {days}d {hours}h {minutes}m {seconds}s\n\n"
-        "📌 Available Commands:\n"
-        "/setfilename [ FILE NAME ]\n"
-        "/setcontactname [ CONTACT NAME ]\n"
-        "/setlimit [ PER VCF CONTACT ]\n"
-        "/setstart [ CONTACT NUMBERING START ]\n"
-        "/setvcfstart [ VCF NUMBERING START ]\n"
-        "/setcountrycode [ +91 / +1 / +44 ]\n"
-        "/setgroup [ START NUMBER ]\n"
-        "/makevcf [ NAME 9876543210 9876543211 ... ]\n"
-        "/merge [ VCF NAME SET ]\n"
-        "/done [ AFTER FILE SET ]\n"
-        "/txt2vcf → [ Convert TXT file to VCF ]\n"
-        "/vcf2txt → [ Convert VCF file to TXT ]\n\n"
-        "🧹 Reset & Settings:\n"
-        "/reset → sab settings default par le aao\n"
-        "/mysettings → apne current settings dekho\n\n"
-        "📤 Send TXT, CSV, XLSX, or VCF files or numbers."
+    await update.message.reply_text(
+        "☠️ *VCF MAKER BOT – BUTTON MODE* ☠️\n\n👇 Option choose karo:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
     )
 
-    keyboard = [
-        [InlineKeyboardButton("Help 📖", url="https://t.me/GODMADARAVCFMAKER")],
-        [InlineKeyboardButton("Owner 💀", url="https://madara21566.github.io/GODMADARA-PROFILE/")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+# ================= BUTTON HANDLER =================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    uid = q.from_user.id
 
-    await update.message.reply_text(help_text, reply_markup=reply_markup)
+    ask = {
+        "filename": "📂 Filename bhejo",
+        "contact": "👤 Contact name bhejo",
+        "limit": "📊 Limit number bhejo",
+        "startnum": "🔢 Contact start number bhejo",
+        "vcfstart": "📄 VCF start number bhejo",
+        "cc": "🌍 Country code bhejo (ex +91)",
+        "group": "📑 Group start number bhejo"
+    }
 
-# ✅ FILE HANDLER
+    if q.data in ask:
+        user_input_state[uid] = q.data
+        await q.message.reply_text(ask[q.data])
+        return
+
+    if q.data == "makevcf":
+        await q.message.reply_text("Example:\nFriends 9876543210 9123456789")
+    elif q.data == "merge":
+        merge_data[uid] = {"files": [], "filename": "Merged"}
+        await q.message.reply_text("📂 Files bhejo\nDone ke liye DONE dabao")
+    elif q.data == "done":
+        await done_merge(update, context)
+    elif q.data == "mysettings":
+        await my_settings(update, context)
+    elif q.data == "reset":
+        await reset_settings(update, context)
+    elif q.data == "txt2vcf":
+        await txt2vcf(update, context)
+    elif q.data == "vcf2txt":
+        await vcf2txt(update, context)
+
+# ================= TEXT HANDLER =================
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    text = update.message.text.strip()
+
+    if uid in user_input_state:
+        state = user_input_state.pop(uid)
+        if state == "filename":
+            user_file_names[uid] = text
+        elif state == "contact":
+            user_contact_names[uid] = text
+        elif state == "limit" and text.isdigit():
+            user_limits[uid] = int(text)
+        elif state == "startnum" and text.isdigit():
+            user_start_indexes[uid] = int(text)
+        elif state == "vcfstart" and text.isdigit():
+            user_vcf_start_numbers[uid] = int(text)
+        elif state == "cc":
+            user_country_codes[uid] = text
+        elif state == "group" and text.isdigit():
+            user_group_start_numbers[uid] = int(text)
+
+        await update.message.reply_text("✅ Saved")
+        await start(update, context)
+        return
+
+    numbers = re.findall(r"\d{7,}", text)
+    if numbers:
+        await process_numbers(update, context, numbers)
+
+# ================= FILE HANDLER =================
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = update.message.document
     path = f"{file.file_unique_id}_{file.file_name}"
     await (await context.bot.get_file(file.file_id)).download_to_drive(path)
-    user_id = update.effective_user.id
+    uid = update.effective_user.id
 
-    if user_id in merge_data:
-        merge_data[user_id]["files"].append(path)
-        await update.message.reply_text(f"📥 File added for merge: {file.file_name}")
+    if uid in merge_data:
+        merge_data[uid]["files"].append(path)
+        await update.message.reply_text("📥 Added")
         return
 
-    if user_id in conversion_mode:
-        mode = conversion_mode[user_id]
-        if mode == "txt2vcf" and path.endswith(".txt"):
-            numbers = extract_numbers_from_txt(path)
-            if numbers:
-                filename = conversion_mode.get(f"{user_id}_name", "Converted")
-                vcf_path = generate_vcf(list(numbers), filename, "Contact")
-                await update.message.reply_document(document=open(vcf_path, "rb"))
-                os.remove(vcf_path)
-            else:
-                await update.message.reply_text("❌ No numbers found in TXT file.")
-        elif mode == "vcf2txt" and path.endswith(".vcf"):
-            numbers = extract_numbers_from_vcf(path)
-            if numbers:
-                filename = conversion_mode.get(f"{user_id}_name", "Converted")
-                txt_path = f"{filename}.txt"
-                with open(txt_path, "w") as f:
-                    f.write("\n".join(numbers))
-                await update.message.reply_document(document=open(txt_path, "rb"))
-                os.remove(txt_path)
-            else:
-                await update.message.reply_text("❌ No numbers found in VCF file.")
+    if uid in conversion_mode:
+        if conversion_mode[uid] == "txt2vcf":
+            nums = extract_numbers_from_txt(path)
+            out = generate_vcf(list(nums), "Converted")
         else:
-            await update.message.reply_text("❌ Wrong file type for this command.")
+            nums = extract_numbers_from_vcf(path)
+            out = "Converted.txt"
+            with open(out, "w") as f:
+                f.write("\n".join(nums))
 
-        conversion_mode.pop(user_id, None)
-        conversion_mode.pop(f"{user_id}_name", None)
-        if os.path.exists(path): os.remove(path)
+        await update.message.reply_document(open(out, "rb"))
+        os.remove(out)
+        os.remove(path)
+        conversion_mode.pop(uid)
         return
 
-    try:
-        if path.endswith('.csv'):
-            df = pd.read_csv(path, encoding='utf-8')
-        elif path.endswith('.xlsx'):
-            df = pd.read_excel(path)
-        elif path.endswith('.txt'):
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            numbers = [''.join(filter(str.isdigit, w)) for w in content.split() if len(w) >= 7]
-            df = pd.DataFrame({'Numbers': numbers})
-        elif path.endswith('.vcf'):
-            numbers = extract_numbers_from_vcf(path)
-            df = pd.DataFrame({'Numbers': list(numbers)})
-        else:
-            await update.message.reply_text("Unsupported file type.")
-            return
-        await process_numbers(update, context, df['Numbers'].dropna().astype(str).tolist())
-    except Exception as e:
-        await update.message.reply_text(f"Error processing file: {str(e)}")
-    finally:
-        if os.path.exists(path): os.remove(path)
-
-# ✅ HANDLE TEXT
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    numbers = [''.join(filter(str.isdigit, w)) for w in update.message.text.split() if len(w) >=7]
-    if numbers:
-        await process_numbers(update, context, numbers)
+    if path.endswith(".vcf"):
+        nums = extract_numbers_from_vcf(path)
     else:
-        await update.message.reply_text("No valid numbers found.")
+        nums = extract_numbers_from_txt(path)
 
-# ✅ PROCESS NUMBERS
+    await process_numbers(update, context, list(nums))
+    os.remove(path)
+
+# ================= PROCESS =================
 async def process_numbers(update, context, numbers):
-    user_id = update.effective_user.id
-    contact_name = user_contact_names.get(user_id, default_contact_name)
-    file_base = user_file_names.get(user_id, default_vcf_name)
-    limit = user_limits.get(user_id, default_limit)
-    start_index = user_start_indexes.get(user_id, None)
-    vcf_num = user_vcf_start_numbers.get(user_id, None)
-    country_code = user_country_codes.get(user_id, "")
-    custom_group_start = user_group_start_numbers.get(user_id, None)
+    uid = update.effective_user.id
+    limit = user_limits.get(uid, default_limit)
+    fname = user_file_names.get(uid, default_vcf_name)
+    cname = user_contact_names.get(uid, default_contact_name)
+    cc = user_country_codes.get(uid, "")
+    start = user_start_indexes.get(uid)
+    vcfstart = user_vcf_start_numbers.get(uid)
+    group = user_group_start_numbers.get(uid)
 
-    numbers = list(dict.fromkeys([n.strip() for n in numbers if n.strip().isdigit()]))
     chunks = [numbers[i:i+limit] for i in range(0, len(numbers), limit)]
-
-    for idx, chunk in enumerate(chunks):
-        group_num = (custom_group_start + idx) if custom_group_start else None
-        file_suffix = f"{vcf_num+idx}" if vcf_num else f"{idx+1}"
-        file_path = generate_vcf(
+    for i, chunk in enumerate(chunks):
+        file = generate_vcf(
             chunk,
-            f"{file_base}_{file_suffix}",
-            contact_name,
-            (start_index + idx*limit) if start_index else None,
-            country_code,
-            group_num
+            f"{fname}_{(vcfstart or 1)+i}",
+            cname,
+            (start or 1) + i*limit,
+            cc,
+            (group+i) if group else None
         )
-        await update.message.reply_document(document=open(file_path, "rb"))
-        os.remove(file_path)
+        await update.message.reply_document(open(file, "rb"))
+        os.remove(file)
 
-# ✅ SETTINGS COMMANDS
-async def set_filename(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        user_file_names[update.effective_user.id] = ' '.join(context.args)
-        await update.message.reply_text(f"✅ File name set to: {' '.join(context.args)}")
+# ================= COMMAND HELPERS =================
+async def txt2vcf(update, context):
+    conversion_mode[update.effective_user.id] = "txt2vcf"
+    await update.message.reply_text("📂 TXT file bhejo")
 
-async def set_contact_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        user_contact_names[update.effective_user.id] = ' '.join(context.args)
-        await update.message.reply_text(f"✅ Contact name set to: {' '.join(context.args)}")
+async def vcf2txt(update, context):
+    conversion_mode[update.effective_user.id] = "vcf2txt"
+    await update.message.reply_text("📂 VCF file bhejo")
 
-async def set_limit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args and context.args[0].isdigit():
-        user_limits[update.effective_user.id] = int(context.args[0])
-        await update.message.reply_text(f"✅ Limit set to: {context.args[0]}")
-
-async def set_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args and context.args[0].isdigit():
-        user_start_indexes[update.effective_user.id] = int(context.args[0])
-        await update.message.reply_text(f"✅ Contact numbering will start from: {context.args[0]}")
-
-async def set_vcf_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args and context.args[0].isdigit():
-        user_vcf_start_numbers[update.effective_user.id] = int(context.args[0])
-        await update.message.reply_text(f"✅ VCF numbering will start from: {context.args[0]}")
-
-async def set_country_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        user_country_codes[update.effective_user.id] = context.args[0]
-        await update.message.reply_text(f"✅ Country code set to: {context.args[0]}")
-
-async def set_group_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args and context.args[0].isdigit():
-        user_group_start_numbers[update.effective_user.id] = int(context.args[0])
-        await update.message.reply_text(f"✅ Group numbering will start from: {context.args[0]}")
-
-async def reset_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_file_names.pop(user_id, None)
-    user_contact_names.pop(user_id, None)
-    user_limits.pop(user_id, None)
-    user_start_indexes.pop(user_id, None)
-    user_vcf_start_numbers.pop(user_id, None)
-    user_country_codes.pop(user_id, None)
-    user_group_start_numbers.pop(user_id, None)
-    await update.message.reply_text("✅ All settings reset to default.")
-
-async def my_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    settings = (
-        f"📂 File name: {user_file_names.get(user_id, default_vcf_name)}\n"
-        f"👤 Contact name: {user_contact_names.get(user_id, default_contact_name)}\n"
-        f"📊 Limit: {user_limits.get(user_id, default_limit)}\n"
-        f"🔢 Start index: {user_start_indexes.get(user_id, 'Not set')}\n"
-        f"📄 VCF start: {user_vcf_start_numbers.get(user_id, 'Not set')}\n"
-        f"🌍 Country code: {user_country_codes.get(user_id, 'None')}\n"
-        f"📑 Group start: {user_group_start_numbers.get(user_id, 'Not set')}"
+async def my_settings(update, context):
+    uid = update.effective_user.id
+    await update.message.reply_text(
+        f"📂 File: {user_file_names.get(uid, default_vcf_name)}\n"
+        f"👤 Contact: {user_contact_names.get(uid, default_contact_name)}\n"
+        f"📊 Limit: {user_limits.get(uid, default_limit)}"
     )
-    await update.message.reply_text(settings)
 
-async def make_vcf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) < 2:
-        await update.message.reply_text("Usage: /makevcf Name number1 number2 ...")
+async def reset_settings(update, context):
+    uid = update.effective_user.id
+    for d in [user_file_names, user_contact_names, user_limits,
+              user_start_indexes, user_vcf_start_numbers,
+              user_country_codes, user_group_start_numbers]:
+        d.pop(uid, None)
+    await update.message.reply_text("♻️ Reset Done")
+
+async def done_merge(update, context):
+    uid = update.effective_user.id
+    if uid not in merge_data:
         return
-    contact_name = context.args[0]
-    numbers = context.args[1:]
-    file_path = generate_vcf(numbers, contact_name, contact_name)
-    await update.message.reply_document(document=open(file_path, "rb"))
-    os.remove(file_path)
+    nums = set()
+    for f in merge_data[uid]["files"]:
+        if f.endswith(".vcf"):
+            nums |= extract_numbers_from_vcf(f)
+        else:
+            nums |= extract_numbers_from_txt(f)
+        os.remove(f)
+    out = generate_vcf(list(nums), "Merged")
+    await update.message.reply_document(open(out, "rb"))
+    os.remove(out)
+    merge_data.pop(uid)
 
-async def merge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    merge_data[user_id] = {"files": [], "filename": "Merged"}
-    if context.args:
-        merge_data[user_id]["filename"] = "_".join(context.args)
-    await update.message.reply_text(f"📂 Send me files to merge. Final file: {merge_data[user_id]['filename']}.vcf\n👉 Use /done when finished.")
-
-async def done_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in merge_data or not merge_data[user_id]["files"]:
-        await update.message.reply_text("❌ No files queued for merge.")
-        return
-    all_numbers = set()
-    for file_path in merge_data[user_id]["files"]:
-        if file_path.endswith(".vcf"): all_numbers.update(extract_numbers_from_vcf(file_path))
-        elif file_path.endswith(".txt"): all_numbers.update(extract_numbers_from_txt(file_path))
-    filename = merge_data[user_id]["filename"]
-    vcf_path = generate_vcf(list(all_numbers), filename)
-    await update.message.reply_document(document=open(vcf_path, "rb"))
-    os.remove(vcf_path)
-    for f_path in merge_data[user_id]["files"]:
-        if os.path.exists(f_path): os.remove(f_path)
-    merge_data.pop(user_id, None)
-    await update.message.reply_text(f"✅ Merge completed → {filename}.vcf")
-
-# ✅ MAIN
+# ================= MAIN =================
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("setfilename", set_filename))
-    app.add_handler(CommandHandler("setcontactname", set_contact_name))
-    app.add_handler(CommandHandler("setlimit", set_limit))
-    app.add_handler(CommandHandler("setstart", set_start))
-    app.add_handler(CommandHandler("setvcfstart", set_vcf_start))
-    app.add_handler(CommandHandler("setcountrycode", set_country_code))
-    app.add_handler(CommandHandler("setgroup", set_group_number))
-    app.add_handler(CommandHandler("reset", reset_settings))
-    app.add_handler(CommandHandler("mysettings", my_settings))
-    app.add_handler(CommandHandler("makevcf", make_vcf_command))
-    app.add_handler(CommandHandler("merge", merge_command))
-    app.add_handler(CommandHandler("done", done_merge))
-    app.add_handler(CommandHandler("txt2vcf", txt2vcf))
-    app.add_handler(CommandHandler("vcf2txt", vcf2txt))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_error_handler(error_handler)
-    print("🚀 Bot is running for everyone...")
+
+    print("🚀 BOT RUNNING (BUTTON MODE)")
     app.run_polling()
-    
