@@ -598,3 +598,163 @@ async def set_country_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_group_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args and context.args[0].isdigit():
+        group_start = int(context.args[0])
+        user_group_start_numbers[update.effective_user.id] = group_start
+        await update.message.reply_text(
+            f"✅ *Group Number Set*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔖 Starting from: `{group_start}`\n\n"
+            f"Groups will be numbered from {group_start}.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text("❌ Usage: `/setgroup [NUMBER]`", parse_mode="Markdown")
+
+async def reset_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_file_names.pop(user_id, None)
+    user_contact_names.pop(user_id, None)
+    user_limits.pop(user_id, None)
+    user_start_indexes.pop(user_id, None)
+    user_vcf_start_numbers.pop(user_id, None)
+    user_country_codes.pop(user_id, None)
+    user_group_start_numbers.pop(user_id, None)
+    await update.message.reply_text(
+        "✅ *All Settings Reset*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🔄 Everything is back to default!\n\n"
+        "Use /mysettings to view defaults.",
+        parse_mode="Markdown"
+    )
+
+async def my_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    settings = (
+        "⚙️ *YOUR CURRENT SETTINGS*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📂 *File name:* `{user_file_names.get(user_id, default_vcf_name)}`\n"
+        f"👤 *Contact name:* `{user_contact_names.get(user_id, default_contact_name)}`\n"
+        f"📊 *Limit:* `{user_limits.get(user_id, default_limit)}`\n"
+        f"🔢 *Start index:* `{user_start_indexes.get(user_id, 'Not set')}`\n"
+        f"📄 *VCF start:* `{user_vcf_start_numbers.get(user_id, 'Not set')}`\n"
+        f"🌍 *Country code:* `{user_country_codes.get(user_id, 'None')}`\n"
+        f"🔖 *Group start:* `{user_group_start_numbers.get(user_id, 'Not set')}`\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 Use /reset to restore defaults"
+    )
+    await update.message.reply_text(settings, parse_mode="Markdown")
+
+async def make_vcf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "❌ *Invalid Usage*\n\n"
+            "📝 Correct format:\n"
+            "`/makevcf Name 1234567890 9876543210`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    contact_name = context.args[0]
+    numbers = context.args[1:]
+    
+    file_path = generate_vcf(numbers, contact_name, contact_name)
+    
+    await update.message.reply_text(
+        f"✅ *VCF Created!*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📱 Contacts: `{len(numbers)}`\n"
+        f"📄 Name: `{contact_name}.vcf`",
+        parse_mode="Markdown"
+    )
+    
+    await update.message.reply_document(document=open(file_path, "rb"))
+    os.remove(file_path)
+
+async def merge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    merge_data[user_id] = {"files": [], "filename": "Merged"}
+    if context.args:
+        merge_data[user_id]["filename"] = "_".join(context.args)
+    
+    await update.message.reply_text(
+        f"🔗 *MERGE MODE ACTIVATED*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📁 Send me VCF/TXT files to merge\n"
+        f"📦 Output: `{merge_data[user_id]['filename']}.vcf`\n\n"
+        f"✅ Use `/done` when finished",
+        parse_mode="Markdown"
+    )
+
+async def done_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in merge_data or not merge_data[user_id]["files"]:
+        await update.message.reply_text("❌ No files queued for merge.")
+        return
+
+    processing_msg = await update.message.reply_text(
+        "🔄 *Merging files...*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "⏳ Please wait...",
+        parse_mode="Markdown"
+    )
+
+    all_numbers = set()
+    for file_path in merge_data[user_id]["files"]:
+        if file_path.endswith(".vcf"):
+            all_numbers.update(extract_numbers_from_vcf(file_path))
+        elif file_path.endswith(".txt"):
+            all_numbers.update(extract_numbers_from_txt(file_path))
+
+    filename = merge_data[user_id]["filename"]
+    vcf_path = generate_vcf(list(all_numbers), filename)
+    
+    await processing_msg.edit_text(
+        f"✅ *Merge Complete!*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📁 Files merged: `{len(merge_data[user_id]['files'])}`\n"
+        f"📱 Total contacts: `{len(all_numbers)}`\n"
+        f"📄 Output: `{filename}.vcf`\n\n"
+        f"⬇️ Sending file...",
+        parse_mode="Markdown"
+    )
+    
+    await update.message.reply_document(document=open(vcf_path, "rb"))
+    os.remove(vcf_path)
+
+    for file_path in merge_data[user_id]["files"]:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    merge_data.pop(user_id, None)
+
+if __name__ == "__main__":
+    from telegram.ext import CallbackQueryHandler
+    
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("setfilename", set_filename))
+    app.add_handler(CommandHandler("setcontactname", set_contact_name))
+    app.add_handler(CommandHandler("setlimit", set_limit))
+    app.add_handler(CommandHandler("setstart", set_start))
+    app.add_handler(CommandHandler("setvcfstart", set_vcf_start))
+    app.add_handler(CommandHandler("setcountrycode", set_country_code))
+    app.add_handler(CommandHandler("setgroup", set_group_number))
+    app.add_handler(CommandHandler("reset", reset_settings))
+    app.add_handler(CommandHandler("mysettings", my_settings))
+    app.add_handler(CommandHandler("makevcf", make_vcf_command))
+    app.add_handler(CommandHandler("merge", merge_command))
+    app.add_handler(CommandHandler("done", done_merge))
+    app.add_handler(CommandHandler("txt2vcf", txt2vcf))
+    app.add_handler(CommandHandler("vcf2txt", vcf2txt))
+
+    # Callback buttons
+    app.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Handlers
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_error_handler(error_handler)
+
+    print("🚀 Bot is running...")
+    app.run_polling()
