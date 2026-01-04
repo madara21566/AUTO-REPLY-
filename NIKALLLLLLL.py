@@ -5,10 +5,11 @@ from datetime import datetime
 import traceback
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     MessageHandler,
     ContextTypes,
+    CallbackQueryHandler,
     filters
 )
 
@@ -85,10 +86,13 @@ def extract_numbers_from_txt(file_path):
             numbers.update(nums)
     return numbers
 
-# ✅ ENHANCED START COMMAND WITH BEAUTIFUL UI
+# ✅ START COMMAND
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id):
-        await update.message.reply_text("❌ Unauthorized. Contact the bot owner.")
+    user_id = update.effective_user.id if update.effective_user else None
+    
+    if not user_id or not is_authorized(user_id):
+        if update.message:
+            await update.message.reply_text("❌ Unauthorized. Contact the bot owner.")
         return
 
     user_name = update.effective_user.first_name
@@ -125,98 +129,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
-
-# ✅ HELP COMMAND WITH BETTER FORMATTING
-async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = (
-        "📖 *COMPLETE COMMAND GUIDE*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        
-        "🎨 *CUSTOMIZATION COMMANDS*\n"
-        "├ `/setfilename` `[NAME]`\n"
-        "│  └ Set output VCF file name\n"
-        "│\n"
-        "├ `/setcontactname` `[NAME]`\n"
-        "│  └ Set contact prefix name\n"
-        "│\n"
-        "├ `/setlimit` `[NUMBER]`\n"
-        "│  └ Contacts per VCF file\n"
-        "│\n"
-        "├ `/setstart` `[NUMBER]`\n"
-        "│  └ Start contact numbering from\n"
-        "│\n"
-        "├ `/setvcfstart` `[NUMBER]`\n"
-        "│  └ Start VCF file numbering from\n"
-        "│\n"
-        "├ `/setcountrycode` `[+91]`\n"
-        "│  └ Add country code to numbers\n"
-        "│\n"
-        "└ `/setgroup` `[NUMBER]`\n"
-        "   └ Add group number to contacts\n\n"
-        
-        "🔄 *CONVERSION COMMANDS*\n"
-        "├ `/txt2vcf` - Convert TXT → VCF\n"
-        "├ `/vcf2txt` - Convert VCF → TXT\n"
-        "└ `/makevcf` `[Name] [Numbers...]`\n\n"
-        
-        "🔗 *MERGE COMMANDS*\n"
-        "├ `/merge` `[OUTPUT_NAME]`\n"
-        "│  └ Start merge mode\n"
-        "└ `/done` - Finish merging files\n\n"
-        
-        "⚙️ *SETTINGS*\n"
-        "├ `/mysettings` - View current settings\n"
-        "└ `/reset` - Reset all to default\n\n"
-        
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "💡 *TIP:* Just send files directly!\n"
-        "Supported: TXT, CSV, XLSX, VCF"
-    )
-    
-    keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data="back_to_start")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode="Markdown")
-
-# ✅ SETTINGS MENU
-async def show_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    
-    settings_text = (
-        "⚙️ *YOUR CURRENT SETTINGS*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📂 *File Name:* `{user_file_names.get(user_id, default_vcf_name)}`\n"
-        f"👤 *Contact Name:* `{user_contact_names.get(user_id, default_contact_name)}`\n"
-        f"📊 *Limit per VCF:* `{user_limits.get(user_id, default_limit)}`\n"
-        f"🔢 *Start Index:* `{user_start_indexes.get(user_id, 'Not set')}`\n"
-        f"📄 *VCF Start:* `{user_vcf_start_numbers.get(user_id, 'Not set')}`\n"
-        f"🌍 *Country Code:* `{user_country_codes.get(user_id, 'None')}`\n"
-        f"🔖 *Group Start:* `{user_group_start_numbers.get(user_id, 'Not set')}`\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "Use commands to modify settings"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("🔄 Reset All", callback_data="reset_confirm")],
-        [InlineKeyboardButton("« Back to Menu", callback_data="back_to_start")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(settings_text, reply_markup=reply_markup, parse_mode="Markdown")
+    if update.message:
+        await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
+    elif update.callback_query:
+        await update.callback_query.message.edit_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
 
 # ✅ CALLBACK QUERY HANDLER
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
     
     if query.data == "txt2vcf":
-        await query.answer()
-        conversion_mode[query.from_user.id] = "txt2vcf"
-        await query.edit_message_text(
+        conversion_mode[user_id] = "txt2vcf"
+        await query.message.edit_text(
             "📥 *TXT → VCF CONVERTER*\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "📎 Send me a TXT file containing phone numbers.\n"
@@ -226,9 +153,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == "vcf2txt":
-        await query.answer()
-        conversion_mode[query.from_user.id] = "vcf2txt"
-        await query.edit_message_text(
+        conversion_mode[user_id] = "vcf2txt"
+        await query.message.edit_text(
             "📤 *VCF → TXT CONVERTER*\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "📎 Send me a VCF file.\n"
@@ -238,10 +164,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == "merge":
-        await query.answer()
-        user_id = query.from_user.id
         merge_data[user_id] = {"files": [], "filename": "Merged"}
-        await query.edit_message_text(
+        await query.message.edit_text(
             "🔗 *MERGE MODE ACTIVATED*\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "📁 Send me multiple VCF/TXT files.\n"
@@ -252,16 +176,81 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == "settings":
-        await show_settings_menu(update, context)
+        settings_text = (
+            "⚙️ *YOUR CURRENT SETTINGS*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📂 *File Name:* `{user_file_names.get(user_id, default_vcf_name)}`\n"
+            f"👤 *Contact Name:* `{user_contact_names.get(user_id, default_contact_name)}`\n"
+            f"📊 *Limit per VCF:* `{user_limits.get(user_id, default_limit)}`\n"
+            f"🔢 *Start Index:* `{user_start_indexes.get(user_id, 'Not set')}`\n"
+            f"📄 *VCF Start:* `{user_vcf_start_numbers.get(user_id, 'Not set')}`\n"
+            f"🌍 *Country Code:* `{user_country_codes.get(user_id, 'None')}`\n"
+            f"🔖 *Group Start:* `{user_group_start_numbers.get(user_id, 'Not set')}`\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Use commands to modify settings"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("🔄 Reset All", callback_data="reset_confirm")],
+            [InlineKeyboardButton("« Back to Menu", callback_data="back_to_start")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.edit_text(settings_text, reply_markup=reply_markup, parse_mode="Markdown")
     
     elif query.data == "help":
-        await show_help(update, context)
+        help_text = (
+            "📖 *COMPLETE COMMAND GUIDE*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            
+            "🎨 *CUSTOMIZATION COMMANDS*\n"
+            "├ `/setfilename [NAME]`\n"
+            "│  └ Set output VCF file name\n"
+            "│\n"
+            "├ `/setcontactname [NAME]`\n"
+            "│  └ Set contact prefix name\n"
+            "│\n"
+            "├ `/setlimit [NUMBER]`\n"
+            "│  └ Contacts per VCF file\n"
+            "│\n"
+            "├ `/setstart [NUMBER]`\n"
+            "│  └ Start contact numbering from\n"
+            "│\n"
+            "├ `/setvcfstart [NUMBER]`\n"
+            "│  └ Start VCF file numbering from\n"
+            "│\n"
+            "├ `/setcountrycode [+91]`\n"
+            "│  └ Add country code to numbers\n"
+            "│\n"
+            "└ `/setgroup [NUMBER]`\n"
+            "   └ Add group number to contacts\n\n"
+            
+            "🔄 *CONVERSION COMMANDS*\n"
+            "├ `/txt2vcf` - Convert TXT → VCF\n"
+            "├ `/vcf2txt` - Convert VCF → TXT\n"
+            "└ `/makevcf [Name] [Numbers...]`\n\n"
+            
+            "🔗 *MERGE COMMANDS*\n"
+            "├ `/merge [OUTPUT_NAME]`\n"
+            "│  └ Start merge mode\n"
+            "└ `/done` - Finish merging files\n\n"
+            
+            "⚙️ *SETTINGS*\n"
+            "├ `/mysettings` - View current settings\n"
+            "└ `/reset` - Reset all to default\n\n"
+            
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *TIP:* Just send files directly!\n"
+            "Supported: TXT, CSV, XLSX, VCF"
+        )
+        
+        keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data="back_to_start")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.edit_text(help_text, reply_markup=reply_markup, parse_mode="Markdown")
     
     elif query.data == "back_to_start":
         await start(update, context)
     
     elif query.data == "reset_confirm":
-        await query.answer()
         keyboard = [
             [
                 InlineKeyboardButton("✅ Yes, Reset", callback_data="reset_yes"),
@@ -269,7 +258,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
+        await query.message.edit_text(
             "⚠️ *CONFIRM RESET*\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Are you sure you want to reset all settings to default?\n\n"
@@ -279,8 +268,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     elif query.data == "reset_yes":
-        await query.answer()
-        user_id = query.from_user.id
         user_file_names.pop(user_id, None)
         user_contact_names.pop(user_id, None)
         user_limits.pop(user_id, None)
@@ -288,7 +275,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_vcf_start_numbers.pop(user_id, None)
         user_country_codes.pop(user_id, None)
         user_group_start_numbers.pop(user_id, None)
-        await query.edit_message_text(
+        await query.message.edit_text(
             "✅ *SETTINGS RESET SUCCESSFUL*\n"
             "━━━━━━━━━━━━━━━━━━━━━\n\n"
             "All settings have been restored to defaults!\n\n"
@@ -296,7 +283,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-# ✅ TXT2VCF & VCF2TXT
+# ✅ TXT2VCF & VCF2TXT COMMANDS
 async def txt2vcf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conversion_mode[update.effective_user.id] = "txt2vcf"
     if context.args:
@@ -323,13 +310,12 @@ async def vcf2txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ✅ FILE HANDLER WITH BETTER MESSAGES
+# ✅ FILE HANDLER
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         await update.message.reply_text("❌ You don't have access to use this bot.")
         return
 
-    # Show processing message
     processing_msg = await update.message.reply_text(
         "⏳ *Processing your file...*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -339,7 +325,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     file = update.message.document
     path = f"{file.file_unique_id}_{file.file_name}"
-    await (await context.bot.get_file(file.file_id)).download_to_drive(path)
+    file_obj = await context.bot.get_file(file.file_id)
+    await file_obj.download_to_drive(path)
     user_id = update.effective_user.id
 
     # Merge mode
@@ -374,7 +361,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
                 
-                await update.message.reply_document(document=open(vcf_path, "rb"))
+                with open(vcf_path, "rb") as vcf_file:
+                    await update.message.reply_document(document=vcf_file)
                 os.remove(vcf_path)
             else:
                 await processing_msg.edit_text("❌ No valid phone numbers found in the file.")
@@ -396,7 +384,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="Markdown"
                 )
                 
-                await update.message.reply_document(document=open(txt_path, "rb"))
+                with open(txt_path, "rb") as txt_file:
+                    await update.message.reply_document(document=txt_file)
                 os.remove(txt_path)
             else:
                 await processing_msg.edit_text("❌ No phone numbers found in the VCF file.")
@@ -410,7 +399,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(path)
         return
 
-    # Normal file handling
+    # Normal file processing
     try:
         if path.endswith('.csv'):
             df = pd.read_csv(path, encoding='utf-8')
@@ -426,6 +415,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             df = pd.DataFrame({'Numbers': list(numbers)})
         else:
             await processing_msg.edit_text("❌ Unsupported file type.")
+            if os.path.exists(path):
+                os.remove(path)
             return
         
         await processing_msg.edit_text(
@@ -444,20 +435,21 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ✅ HANDLE TEXT
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_authorized(update.effective_user.id): return
+    if not is_authorized(update.effective_user.id):
+        return
     
     processing_msg = await update.message.reply_text(
         "🔍 *Searching for phone numbers...*",
         parse_mode="Markdown"
     )
     
-    numbers = [''.join(filter(str.isdigit, w)) for w in update.message.text.split() if len(w) >=7]
+    numbers = [''.join(filter(str.isdigit, w)) for w in update.message.text.split() if len(w) >= 7]
     if numbers:
         await process_numbers(update, context, numbers, processing_msg)
     else:
         await processing_msg.edit_text("❌ No valid phone numbers found.")
 
-# ✅ PROCESS NUMBERS WITH BETTER FEEDBACK
+# ✅ PROCESS NUMBERS
 async def process_numbers(update, context, numbers, status_msg=None):
     user_id = update.effective_user.id
     contact_name = user_contact_names.get(user_id, default_contact_name)
@@ -495,13 +487,10 @@ async def process_numbers(update, context, numbers, status_msg=None):
         )
         
         caption = f"📁 File {idx+1}/{len(chunks)} | 📱 {len(chunk)} contacts"
-        await update.message.reply_document(
-            document=open(file_path, "rb"),
-            caption=caption
-        )
+        with open(file_path, "rb") as vcf_file:
+            await update.message.reply_document(document=vcf_file, caption=caption)
         os.remove(file_path)
     
-    # Final success message
     await update.message.reply_text(
         f"🎉 *All Done!*\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -511,7 +500,7 @@ async def process_numbers(update, context, numbers, status_msg=None):
         parse_mode="Markdown"
     )
 
-# ✅ SETTINGS COMMANDS WITH BETTER FEEDBACK
+# ✅ SETTINGS COMMANDS
 async def set_filename(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         filename = ' '.join(context.args)
@@ -622,8 +611,7 @@ async def reset_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "✅ *All Settings Reset*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🔄 Everything is back to default!\n\n"
-        "Use /mysettings to view defaults.",
+        "Everything is back to default values!",
         parse_mode="Markdown"
     )
 
@@ -632,24 +620,24 @@ async def my_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = (
         "⚙️ *YOUR CURRENT SETTINGS*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📂 *File name:* `{user_file_names.get(user_id, default_vcf_name)}`\n"
-        f"👤 *Contact name:* `{user_contact_names.get(user_id, default_contact_name)}`\n"
-        f"📊 *Limit:* `{user_limits.get(user_id, default_limit)}`\n"
-        f"🔢 *Start index:* `{user_start_indexes.get(user_id, 'Not set')}`\n"
-        f"📄 *VCF start:* `{user_vcf_start_numbers.get(user_id, 'Not set')}`\n"
-        f"🌍 *Country code:* `{user_country_codes.get(user_id, 'None')}`\n"
-        f"🔖 *Group start:* `{user_group_start_numbers.get(user_id, 'Not set')}`\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "💡 Use /reset to restore defaults"
+        f"📂 *File Name:* `{user_file_names.get(user_id, default_vcf_name)}`\n"
+        f"👤 *Contact Name:* `{user_contact_names.get(user_id, default_contact_name)}`\n"
+        f"📊 *Limit per VCF:* `{user_limits.get(user_id, default_limit)}`\n"
+        f"🔢 *Start Index:* `{user_start_indexes.get(user_id, 'Not set')}`\n"
+        f"📄 *VCF Start:* `{user_vcf_start_numbers.get(user_id, 'Not set')}`\n"
+        f"🌍 *Country Code:* `{user_country_codes.get(user_id, 'None')}`\n"
+        f"🔖 *Group Start:* `{user_group_start_numbers.get(user_id, 'Not set')}`"
     )
     await update.message.reply_text(settings, parse_mode="Markdown")
 
+# ✅ MAKEVCF COMMAND
 async def make_vcf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
         await update.message.reply_text(
-            "❌ *Invalid Usage*\n\n"
-            "📝 Correct format:\n"
-            "`/makevcf Name 1234567890 9876543210`",
+            "❌ *Invalid Usage*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Usage: `/makevcf Name number1 number2 ...`\n\n"
+            "Example: `/makevcf John 9876543210 9876543211`",
             parse_mode="Markdown"
         )
         return
@@ -657,19 +645,29 @@ async def make_vcf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contact_name = context.args[0]
     numbers = context.args[1:]
     
-    file_path = generate_vcf(numbers, contact_name, contact_name)
-    
-    await update.message.reply_text(
-        f"✅ *VCF Created!*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📱 Contacts: `{len(numbers)}`\n"
-        f"📄 Name: `{contact_name}.vcf`",
+    processing_msg = await update.message.reply_text(
+        "🔄 *Creating VCF...*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📱 Processing {len(numbers)} number(s)...",
         parse_mode="Markdown"
     )
     
-    await update.message.reply_document(document=open(file_path, "rb"))
+    file_path = generate_vcf(numbers, contact_name, contact_name)
+    
+    await processing_msg.edit_text(
+        f"✅ *VCF Created!*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📱 Contacts: `{len(numbers)}`\n"
+        f"📄 Name: `{contact_name}.vcf`\n\n"
+        f"⬇️ Downloading...",
+        parse_mode="Markdown"
+    )
+    
+    with open(file_path, "rb") as vcf_file:
+        await update.message.reply_document(document=vcf_file)
     os.remove(file_path)
 
+# ✅ MERGE COMMANDS
 async def merge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     merge_data[user_id] = {"files": [], "filename": "Merged"}
@@ -679,22 +677,27 @@ async def merge_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🔗 *MERGE MODE ACTIVATED*\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📁 Send me VCF/TXT files to merge\n"
-        f"📦 Output: `{merge_data[user_id]['filename']}.vcf`\n\n"
-        f"✅ Use `/done` when finished",
+        f"📁 Send me files to merge.\n"
+        f"📄 Output: `{merge_data[user_id]['filename']}.vcf`\n\n"
+        f"✅ Use `/done` when finished.",
         parse_mode="Markdown"
     )
 
 async def done_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in merge_data or not merge_data[user_id]["files"]:
-        await update.message.reply_text("❌ No files queued for merge.")
+        await update.message.reply_text(
+            "❌ *No Files to Merge*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Please use `/merge` first and send files!",
+            parse_mode="Markdown"
+        )
         return
 
     processing_msg = await update.message.reply_text(
-        "🔄 *Merging files...*\n"
+        "🔄 *Merging Files...*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "⏳ Please wait...",
+        "⏳ Processing all contacts...",
         parse_mode="Markdown"
     )
 
@@ -714,11 +717,12 @@ async def done_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📁 Files merged: `{len(merge_data[user_id]['files'])}`\n"
         f"📱 Total contacts: `{len(all_numbers)}`\n"
         f"📄 Output: `{filename}.vcf`\n\n"
-        f"⬇️ Sending file...",
+        f"⬇️ Downloading...",
         parse_mode="Markdown"
     )
     
-    await update.message.reply_document(document=open(vcf_path, "rb"))
+    with open(vcf_path, "rb") as vcf_file:
+        await update.message.reply_document(document=vcf_file)
     os.remove(vcf_path)
 
     for file_path in merge_data[user_id]["files"]:
@@ -726,35 +730,36 @@ async def done_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(file_path)
     merge_data.pop(user_id, None)
 
+# ✅ MAIN
 if __name__ == "__main__":
-    from telegram.ext import CallbackQueryHandler
-    
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).build()
 
     # Commands
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("setfilename", set_filename))
-    app.add_handler(CommandHandler("setcontactname", set_contact_name))
-    app.add_handler(CommandHandler("setlimit", set_limit))
-    app.add_handler(CommandHandler("setstart", set_start))
-    app.add_handler(CommandHandler("setvcfstart", set_vcf_start))
-    app.add_handler(CommandHandler("setcountrycode", set_country_code))
-    app.add_handler(CommandHandler("setgroup", set_group_number))
-    app.add_handler(CommandHandler("reset", reset_settings))
-    app.add_handler(CommandHandler("mysettings", my_settings))
-    app.add_handler(CommandHandler("makevcf", make_vcf_command))
-    app.add_handler(CommandHandler("merge", merge_command))
-    app.add_handler(CommandHandler("done", done_merge))
-    app.add_handler(CommandHandler("txt2vcf", txt2vcf))
-    app.add_handler(CommandHandler("vcf2txt", vcf2txt))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("setfilename", set_filename))
+    application.add_handler(CommandHandler("setcontactname", set_contact_name))
+    application.add_handler(CommandHandler("setlimit", set_limit))
+    application.add_handler(CommandHandler("setstart", set_start))
+    application.add_handler(CommandHandler("setvcfstart", set_vcf_start))
+    application.add_handler(CommandHandler("setcountrycode", set_country_code))
+    application.add_handler(CommandHandler("setgroup", set_group_number))
+    application.add_handler(CommandHandler("reset", reset_settings))
+    application.add_handler(CommandHandler("mysettings", my_settings))
+    application.add_handler(CommandHandler("makevcf", make_vcf_command))
+    application.add_handler(CommandHandler("merge", merge_command))
+    application.add_handler(CommandHandler("done", done_merge))
+    application.add_handler(CommandHandler("txt2vcf", txt2vcf))
+    application.add_handler(CommandHandler("vcf2txt", vcf2txt))
 
-    # Callback buttons
-    app.add_handler(CallbackQueryHandler(button_callback))
+    # Callback Query Handler for Inline Buttons
+    application.add_handler(CallbackQueryHandler(button_callback))
+
+    # Message Handlers
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    # Handlers
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_error_handler(error_handler)
+    # Error Handler
+    application.add_error_handler(error_handler)
 
-    print("🚀 Bot is running...")
-    app.run_polling()
+    print("🚀 VCF Master Bot is running with enhanced UI...")
+    application.run_polling()
