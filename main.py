@@ -83,8 +83,6 @@ def main_menu():
         [InlineKeyboardButton("🔁 TXT → VCF", callback_data="txt2vcf"),
          InlineKeyboardButton("🔄 VCF → TXT", callback_data="vcf2txt")],
         [InlineKeyboardButton("🧩 Merge Files", callback_data="merge")],
-        [InlineKeyboardButton("✏️ Rename VCF Files", callback_data="rename_files")],
-        [InlineKeyboardButton("✏️ Rename Contacts", callback_data="rename_contacts")],
         [InlineKeyboardButton("📊 My Settings", callback_data="mysettings")],
         [InlineKeyboardButton("♻️ Reset", callback_data="reset")],
     ])
