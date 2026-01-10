@@ -1,7 +1,6 @@
 import os
 import re
 import traceback
-import pandas as pd
 
 from telegram import (
     Update,
@@ -90,19 +89,6 @@ def make_vcf(numbers, cfg, index):
         f.write(out)
     return fname
 
-def rename_contacts(path, new_name, start):
-    out = ""
-    idx = start
-    with open(path, "r", errors="ignore") as f:
-        for l in f:
-            if l.startswith("FN:"):
-                out += f"FN:{new_name}{str(idx).zfill(3)}\n"
-                idx += 1
-            else:
-                out += l
-    with open(path, "w") as f:
-        f.write(out)
-
 # ================= UI =================
 def main_menu():
     return InlineKeyboardMarkup([
@@ -143,9 +129,12 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     st = state(uid)
     cfg = settings(uid)
 
+    # RESET ANY PREVIOUS STEP
+    if q.data in ["gen", "txt2vcf", "vcf2txt", "merge", "rename_files", "rename_contacts"]:
+        st["step"] = None
+
     if q.data == "gen":
         st["mode"] = "gen"
-        st["step"] = None
         return await q.message.reply_text(
             "⚙️ Please set details first",
             reply_markup=gen_settings_menu()
@@ -165,22 +154,34 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await q.message.reply_text(prompts[q.data])
 
     if q.data == "gen_done":
+        st["mode"] = "gen"
         st["step"] = None
         return await q.message.reply_text(
-            "📤 Now send numbers or TXT file\nExample:\n9876543210 9123456789"
+            "📤 Now send numbers or TXT file\n\nExample:\n9876543210 9123456789"
         )
 
-    if q.data in ["txt2vcf", "vcf2txt", "merge", "rename_files", "rename_contacts"]:
-        st["mode"] = q.data
-        st["step"] = None
-        messages = {
-            "txt2vcf": "📂 Send TXT file",
-            "vcf2txt": "📂 Send VCF file",
-            "merge": "📥 Send TXT / VCF files, then type DONE",
-            "rename_files": "📂 Send VCF files to rename",
-            "rename_contacts": "📂 Send VCF files (rename contacts)",
-        }
-        return await q.message.reply_text(messages[q.data])
+    if q.data == "txt2vcf":
+        st["mode"] = "txt2vcf"
+        return await q.message.reply_text("📂 Send TXT file")
+
+    if q.data == "vcf2txt":
+        st["mode"] = "vcf2txt"
+        return await q.message.reply_text("📂 Send VCF file")
+
+    if q.data == "merge":
+        st["mode"] = "merge"
+        merge_queue[uid] = []
+        return await q.message.reply_text("📥 Send TXT / VCF files\nType DONE when finished")
+
+    if q.data == "rename_files":
+        st["mode"] = "rename_files"
+        rename_files_queue[uid] = []
+        return await q.message.reply_text("📂 Send VCF files to rename")
+
+    if q.data == "rename_contacts":
+        st["mode"] = "rename_contacts"
+        rename_contacts_queue[uid] = {"files": []}
+        return await q.message.reply_text("📂 Send VCF files (rename contacts)")
 
     if q.data == "mysettings":
         return await q.message.reply_text(
@@ -199,7 +200,10 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         merge_queue.pop(uid, None)
         rename_files_queue.pop(uid, None)
         rename_contacts_queue.pop(uid, None)
-        return await q.message.reply_text("♻️ All settings reset successfully")
+        return await q.message.reply_text(
+            "♻️ All settings reset\n\nChoose option 👇",
+            reply_markup=main_menu()
+        )
 
 # ================= TEXT HANDLER =================
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -208,6 +212,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cfg = settings(uid)
     txt = update.message.text.strip()
 
+    # SETTING INPUT
     if st["step"]:
         mapping = {
             "set_file": "file_name",
@@ -223,6 +228,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         st["step"] = None
         return await update.message.reply_text(f"✅ {key.replace('_',' ')} set")
 
+    # MERGE DONE
     if st["mode"] == "merge" and txt.lower() == "done":
         nums = []
         for f in merge_queue.get(uid, []):
@@ -234,16 +240,31 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_document(open(f, "rb"))
             os.remove(f)
 
-        merge_queue.pop(uid, None)
         st["mode"] = None
-        return
+        merge_queue.pop(uid, None)
 
-    numbers = re.findall(r"\d{7,}", txt)
-    if numbers and st["mode"] == "gen":
+        return await update.message.reply_text(
+            "✅ Files merged successfully\n\nChoose next option 👇",
+            reply_markup=main_menu()
+        )
+
+    # GENERATE VIA TEXT
+    if st["mode"] == "gen":
+        numbers = re.findall(r"\d{7,}", txt)
+        if not numbers:
+            return await update.message.reply_text("❌ No numbers found")
+
         for i, c in enumerate(chunk(numbers, cfg["limit"])):
             f = make_vcf(c, cfg, i)
             await update.message.reply_document(open(f, "rb"))
             os.remove(f)
+
+        st["mode"] = None
+
+        return await update.message.reply_text(
+            "✅ VCF generated successfully\n\nChoose next option 👇",
+            reply_markup=main_menu()
+        )
 
 # ================= FILE HANDLER =================
 async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -255,26 +276,22 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     path = doc.file_name
     await (await ctx.bot.get_file(doc.file_id)).download_to_drive(path)
 
-    if st["mode"] == "merge":
-        merge_queue.setdefault(uid, []).append(path)
-        return await update.message.reply_text("📥 File added")
+    # 🔥 PRIORITY: GENERATE VCF
+    if st["mode"] == "gen":
+        nums = extract_txt(path) if path.endswith(".txt") else extract_vcf(path)
 
-    if st["mode"] == "rename_files":
-        rename_files_queue.setdefault(uid, []).append(path)
-        return await update.message.reply_text("✏️ Send new file name")
+        for i, c in enumerate(chunk(nums, cfg["limit"])):
+            f = make_vcf(c, cfg, i)
+            await update.message.reply_document(open(f, "rb"))
+            os.remove(f)
 
-    if st["mode"] == "rename_contacts":
-        rename_contacts_queue.setdefault(uid, []).append(path)
-        return await update.message.reply_text("✏️ Send new contact name")
-
-    if st["mode"] == "vcf2txt":
-        nums = extract_vcf(path)
-        out = "numbers.txt"
-        open(out, "w").write("\n".join(nums))
-        await update.message.reply_document(open(out, "rb"))
-        os.remove(out)
         os.remove(path)
-        return
+        st["mode"] = None
+
+        return await update.message.reply_text(
+            "✅ VCF generated successfully\n\nChoose next option 👇",
+            reply_markup=main_menu()
+        )
 
     if st["mode"] == "txt2vcf":
         nums = extract_txt(path)
@@ -283,7 +300,22 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_document(open(f, "rb"))
             os.remove(f)
         os.remove(path)
+        st["mode"] = None
         return
+
+    if st["mode"] == "vcf2txt":
+        nums = extract_vcf(path)
+        out = "numbers.txt"
+        open(out, "w").write("\n".join(nums))
+        await update.message.reply_document(open(out, "rb"))
+        os.remove(out)
+        os.remove(path)
+        st["mode"] = None
+        return
+
+    if st["mode"] == "merge":
+        merge_queue.setdefault(uid, []).append(path)
+        return await update.message.reply_text("📥 File added")
 
 # ================= ERROR =================
 async def error_handler(update, ctx):
