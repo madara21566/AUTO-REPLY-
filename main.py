@@ -1,3 +1,18 @@
+# ========= KEEP ALIVE (REPLIT 24/7) =========
+from flask import Flask
+import threading
+
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return "Bot is alive"
+
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=8080)
+
+threading.Thread(target=run_flask, daemon=True).start()
+# ===========================================
 import os, re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
