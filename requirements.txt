@@ -1,6 +1,5 @@
-flask 
+
 psutil
-Flask
 gunicorn
 aiohttp
 python-telegram-bot[webhooks]
@@ -16,3 +15,7 @@ pandas
 openpyxl
 xlrd
 werkzeug
+flask==2.3.3
+python-telegram-bot==20.8
+pandas
+httpx
