@@ -118,8 +118,7 @@ def gen_settings_menu():
 
 # ================= BOT HANDLERS =================
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if not auth(uid):
+    if not auth(update.effective_user.id):
         return await update.message.reply_text("❌ Access denied")
     await update.message.reply_text(
         "👋 Welcome to VCF Generator Bot\n\nChoose an option below 👇",
@@ -133,7 +132,6 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     st = state(uid)
     cfg = settings(uid)
 
-    # ===== MAIN MODES =====
     if q.data == "gen":
         st["mode"] = "generate"
         st["step"] = None
@@ -151,7 +149,6 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         merge_files[uid] = []
         return await q.message.reply_text("📥 Send TXT / VCF files")
 
-    # ===== SETTINGS BUTTONS =====
     if q.data.startswith("set_"):
         st["step"] = q.data
         prompts = {
@@ -168,13 +165,11 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if q.data == "gen_done":
         st["step"] = None
         return await q.message.reply_text(
-            "📤 Now send numbers or file\n"
-            "Example:\n3838376362 8283736272"
+            "📤 Now send numbers or file\nExample:\n3838376362 8283736272"
         )
 
-    # ===== MY SETTINGS =====
     if q.data == "mysettings":
-        msg = (
+        return await q.message.reply_text(
             "📊 Your Current Settings\n\n"
             f"📂 File name: {cfg['file_name']}\n"
             f"👤 Contact name: {cfg['contact_name']}\n"
@@ -184,9 +179,7 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"🌍 Country code: {cfg['country_code'] if cfg['country_code'] else 'None'}\n"
             f"📑 Group start: {cfg['group_start'] if cfg['group_start'] is not None else 'Not set'}"
         )
-        return await q.message.reply_text(msg)
 
-    # ===== RESET =====
     if q.data == "reset":
         user_settings[uid] = DEFAULT_SETTINGS.copy()
         user_state[uid] = {"mode": None, "step": None}
@@ -202,7 +195,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     cfg = settings(uid)
     text = update.message.text.strip()
 
-    # ===== SETTING INPUT =====
     if st["step"]:
         key_map = {
             "set_file": "file_name",
@@ -218,7 +210,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         st["step"] = None
         return await update.message.reply_text(f"✅ Your {key.replace('_',' ')} is set")
 
-    # ===== MERGE DONE =====
     if st["mode"] == "merge_files" and text.lower() == "done":
         nums=set()
         for p in merge_files.get(uid, []):
@@ -233,7 +224,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         st["mode"] = None
         return
 
-    # ===== NUMBER INPUT =====
     numbers = re.findall(r"\d{7,}", text)
     if numbers:
         for i, c in enumerate(chunk(numbers, cfg["limit"])):
@@ -301,10 +291,6 @@ async def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
     await application.process_update(update)
     return "ok"
-
-@app.before_first_request
-def set_webhook():
-    application.bot.set_webhook(f"{APP_URL}/webhook")
 
 # ================= RUN =================
 if __name__ == "__main__":
