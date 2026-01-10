@@ -1,15 +1,11 @@
 import os, re
-from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, ApplicationBuilder, CommandHandler,
-    CallbackQueryHandler, MessageHandler, ContextTypes, filters
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters
 )
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-
-app_flask = Flask(__name__)
 
 # ================= SETTINGS =================
 DEFAULT_SETTINGS = {
@@ -104,10 +100,14 @@ def gen_menu():
         [InlineKeyboardButton("✅ Done", callback_data="gen_done")],
     ])
 
-# ================= BOT HANDLERS =================
+# ================= START =================
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Welcome\nChoose option 👇", reply_markup=main_menu())
+    await update.message.reply_text(
+        "👋 Welcome to VCF Manager Bot\nChoose option 👇",
+        reply_markup=main_menu()
+    )
 
+# ================= BUTTONS =================
 async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -124,8 +124,8 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "gen_file": ("file", "📂 Send file name"),
         "gen_contact": ("contact", "👤 Send contact name"),
         "gen_limit": ("limit", "📊 Send VCF limit"),
-        "gen_contact_start": ("contact_start", "🔢 Send contact start"),
-        "gen_vcf_start": ("vcf_start", "📄 Send VCF start"),
+        "gen_contact_start": ("contact_start", "🔢 Send contact start number"),
+        "gen_vcf_start": ("vcf_start", "📄 Send VCF start number"),
         "gen_cc": ("cc", "🌍 Send country code or 0"),
         "gen_group": ("group", "📑 Send group number"),
     }
@@ -160,6 +160,26 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         rename_contacts_queue[uid] = {"files": []}
         return await q.message.reply_text("📂 Send VCF files")
 
+    if q.data == "mysettings":
+        return await q.message.reply_text(
+            f"📂 File: {cfg['file_name']}\n"
+            f"👤 Contact: {cfg['contact_name']}\n"
+            f"📊 Limit: {cfg['limit']}\n"
+            f"🔢 Start: {cfg['contact_start']}\n"
+            f"📄 VCF Start: {cfg['vcf_start']}\n"
+            f"🌍 Code: {cfg['country_code'] or 'None'}\n"
+            f"📑 Group: {cfg['group_number'] or 'Not set'}"
+        )
+
+    if q.data == "reset":
+        user_settings[uid] = DEFAULT_SETTINGS.copy()
+        user_state[uid] = {"mode": None, "step": None}
+        merge_queue.pop(uid, None)
+        rename_files_queue.pop(uid, None)
+        rename_contacts_queue.pop(uid, None)
+        return await q.message.reply_text("♻️ Reset done", reply_markup=main_menu())
+
+# ================= TEXT =================
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     st = state(uid)
@@ -179,7 +199,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         key = key_map[st["step"]]
         cfg[key] = int(txt) if txt.isdigit() else txt
         st["step"] = None
-        return await update.message.reply_text("✅ Saved")
+        return await update.message.reply_text("✅ Setting saved")
 
     if st["mode"] == "merge" and txt.lower() == "done":
         nums = set()
@@ -190,8 +210,40 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_document(open(f, "rb"))
         os.remove(f)
         st["mode"] = None
-        return await update.message.reply_text("✅ Merged", reply_markup=main_menu())
+        return await update.message.reply_text("✅ Files merged", reply_markup=main_menu())
 
+    if st["mode"] == "rename_files":
+        for i, f in enumerate(rename_files_queue[uid], 1):
+            nf = f"{txt}_{i}.vcf"
+            os.rename(f, nf)
+            await update.message.reply_document(open(nf, "rb"))
+            os.remove(nf)
+        st["mode"] = None
+        return await update.message.reply_text("✅ Files renamed", reply_markup=main_menu())
+
+    if st["mode"] == "rename_contacts":
+        data = rename_contacts_queue[uid]
+        if "name" not in data:
+            data["name"] = txt
+            return await update.message.reply_text("🔢 Send start number")
+        start = int(txt)
+        for f in data["files"]:
+            rename_contacts_inside(f, data["name"], start)
+            await update.message.reply_document(open(f, "rb"))
+            os.remove(f)
+        st["mode"] = None
+        return await update.message.reply_text("✅ Contacts renamed", reply_markup=main_menu())
+
+    if st["mode"] == "gen" and st["step"] == "waiting_input":
+        nums = re.findall(r"\d{7,}", txt)
+        for i, c in enumerate(chunk(nums, cfg["limit"])):
+            f = make_vcf(c, cfg, i)
+            await update.message.reply_document(open(f, "rb"))
+            os.remove(f)
+        st["mode"] = st["step"] = None
+        return await update.message.reply_text("✅ VCF generated", reply_markup=main_menu())
+
+# ================= FILE =================
 async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     st = state(uid)
@@ -201,7 +253,6 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     path = doc.file_name
     await (await ctx.bot.get_file(doc.file_id)).download_to_drive(path)
 
-    # ✅ FIX 1: Generate VCF TXT support
     if st["mode"] == "gen" and st["step"] == "waiting_input":
         nums = extract_txt(path)
         for i, c in enumerate(chunk(nums, cfg["limit"])):
@@ -212,7 +263,6 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         st["mode"] = st["step"] = None
         return await update.message.reply_text("✅ VCF generated", reply_markup=main_menu())
 
-    # TXT → VCF (single)
     if st["mode"] == "txt2vcf":
         nums = extract_txt(path)
         f = make_vcf(nums, cfg, 0)
@@ -220,6 +270,19 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         os.remove(f); os.remove(path)
         st["mode"] = None
         return await update.message.reply_text("✅ TXT → VCF done", reply_markup=main_menu())
+
+    if st["mode"] == "vcf2txt":
+        nums = extract_vcf(path)
+        out = "numbers.txt"
+        open(out, "w").write("\n".join(nums))
+        await update.message.reply_document(open(out, "rb"))
+        os.remove(out); os.remove(path)
+        st["mode"] = None
+        return await update.message.reply_text("✅ VCF → TXT done", reply_markup=main_menu())
+
+    if st["mode"] == "merge":
+        merge_queue[uid].append(path)
+        return await update.message.reply_text("📥 File added")
 
     if st["mode"] == "rename_files":
         rename_files_queue[uid].append(path)
@@ -229,26 +292,12 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         rename_contacts_queue[uid]["files"].append(path)
         return await update.message.reply_text("✏️ Send new contact name")
 
-# ================= WEBHOOK =================
-application = ApplicationBuilder().token(BOT_TOKEN).build()
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(buttons))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-application.add_handler(MessageHandler(filters.Document.ALL, handle_file))
-
-@app_flask.route("/", methods=["GET"])
-def home():
-    return "Bot running"
-
-@app_flask.route("/webhook", methods=["POST"])
-async def webhook():
-    update = Update.de_json(request.json, application.bot)
-    await application.process_update(update)
-    return "ok"
-
+# ================= MAIN =================
 if __name__ == "__main__":
-    import asyncio
-    async def main():
-        await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
-    asyncio.run(main())
-    app_flask.run(host="0.0.0.0", port=10000)
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    print("🚀 Bot running (polling)")
+    app.run_polling()
