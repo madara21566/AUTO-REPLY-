@@ -224,32 +224,32 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             st.clear()
             return await update.message.reply_text("✅ VCF generated", reply_markup=main_menu())
 
-    # RENAME FILES
-    if st["mode"] == "rename_files" and uid in rename_files_queue:
-        new = txt
+    # RENAME FILES FINAL
+    if st["mode"] == "rename_files":
         for i, f in enumerate(rename_files_queue[uid], 1):
-            nf = f"{new}_{i}.vcf"
-            os.rename(f, nf)
-            await update.message.reply_document(open(nf, "rb"))
-            os.remove(nf)
-        rename_files_queue.pop(uid)
+            newf = f"{txt}_{i}.vcf"
+            os.rename(f, newf)
+            await update.message.reply_document(open(newf, "rb"))
+            os.remove(newf)
+        rename_files_queue.pop(uid, None)
         st["mode"] = None
-        return await update.message.reply_text("✅ Files renamed", reply_markup=main_menu())
+        return await update.message.reply_text("✅ VCF files renamed", reply_markup=main_menu())
 
-    # RENAME CONTACTS
+    # RENAME CONTACTS FLOW
     if st["mode"] == "rename_contacts":
-        data = rename_contacts_queue[uid]
-        if "name" not in data:
-            data["name"] = txt
+        if st["step"] == "name":
+            rename_contacts_queue[uid]["name"] = txt
+            st["step"] = "start"
             return await update.message.reply_text("🔢 Send start number")
-        if "start" not in data:
-            data["start"] = int(txt)
+
+        if st["step"] == "start":
+            data = rename_contacts_queue[uid]
             for f in data["files"]:
-                rename_contacts_inside(f, data["name"], data["start"])
+                rename_contacts_inside(f, data["name"], int(txt))
                 await update.message.reply_document(open(f, "rb"))
                 os.remove(f)
-            rename_contacts_queue.pop(uid)
-            st["mode"] = None
+            rename_contacts_queue.pop(uid, None)
+            st["mode"] = st["step"] = None
             return await update.message.reply_text("✅ Contacts renamed", reply_markup=main_menu())
 
 # ================= FILE =================
@@ -257,7 +257,6 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     st = state(uid)
-    cfg = settings(uid)
 
     doc = update.message.document
     path = doc.file_name
@@ -265,10 +264,11 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if st["mode"] == "rename_files":
         rename_files_queue[uid].append(path)
-        return await update.message.reply_text("✏️ Send new file name")
+        return await update.message.reply_text("📥 File added")
 
     if st["mode"] == "rename_contacts":
         rename_contacts_queue[uid]["files"].append(path)
+        st["step"] = "name"
         return await update.message.reply_text("✏️ Send new contact name")
 
 # ================= MAIN =================
