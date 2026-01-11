@@ -86,7 +86,7 @@ def main_menu():
 # ================= START =================
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "",
+        " ",
         reply_markup=main_menu()
     )
 
