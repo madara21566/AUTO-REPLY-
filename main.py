@@ -13,10 +13,7 @@ from telegram.ext import (
 )
 
 # ===== IMPORT BOTH CORE FILES =====
-import bot_core
-import bot_coree
-
-
+import bot
 # ================= ENV =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID"))
