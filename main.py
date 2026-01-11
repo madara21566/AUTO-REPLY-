@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # ===== IMPORT ORIGINAL BOT =====
-import hahh  # tumhara original script
+import bot_core # tumhara original script
 
 # ================= ENV =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
