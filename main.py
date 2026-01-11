@@ -96,7 +96,13 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
     if not is_allowed(uid):
-        return await update.message.reply_text("⛔ This is a private bot")
+        return await update.message.reply_text (
+        "📂💾 *VCF Bot Access*\n"
+        "Want my *VCF Converter Bot*?\n"
+        "Just DM me anytime — I’ll reply to you fast!\n\n"
+        "📩 *Direct Message here:* @MADARAXHEREE\n\n"
+        "⚡ Convert TXT ⇄ VCF instantly | 🪄 Easy & Quick | 🔒 Trusted"
+        )
 
     if uid == OWNER_ID:
         await update.message.reply_text(
