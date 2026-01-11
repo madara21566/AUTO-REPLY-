@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 # ===== IMPORT ORIGINAL BOT =====
-import bot_core # tumhara original script
+import bot_core  # tumhara original script
 
 # ================= ENV =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -69,32 +69,32 @@ orig_buttons = bot_core.buttons
 orig_text = bot_core.handle_text
 orig_file = bot_core.handle_file
 
-# ================= SECURED WRAPPERS =================
+# ================= START =================
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    if not is_allowed(uid):
-        return await update.message.reply_text("📂💾 *VCF Bot Access*\n"
-        "Want my *VCF Converter Bot*?\n"
-        "Just DM me anytime — I’ll reply to you fast!\n\n"
-        "📩 *Direct Message here:* @MADARAXHEREE\n\n"
-        "⚡ Convert TXT ⇄ VCF instantly | 🪄 Easy & Quick | 🔒 Trusted"
-                                              )
 
+    if not is_allowed(uid):
+        return await update.message.reply_text(
+            "📂💾 *VCF Bot Access*\n"
+            "Want my *VCF Converter Bot*?\n"
+            "Just DM me anytime — I’ll reply fast!\n\n"
+            "📩 @MADARAXHEREE\n\n"
+            "⚡ TXT ⇄ VCF | 🪄 Easy | 🔒 Trusted",
+            parse_mode="Markdown"
+        )
+
+    # 🔑 OWNER ONLY ADMIN BUTTON
     if uid == OWNER_ID:
         await update.message.reply_text(
-            "👑 Admin Access Enabled\n\nSend /admin for control panel"
+            "👑 Owner Mode Active",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔐 Admin Panel", callback_data="open_admin")]
+            ])
         )
 
     return await orig_start(update, ctx)
 
-async def admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        return
-    await update.message.reply_text(
-        "🔐 Admin Panel",
-        reply_markup=admin_menu()
-    )
-
+# ================= BUTTONS =================
 async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     uid = q.from_user.id
@@ -103,15 +103,22 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(uid):
         return await q.answer("⛔ Private Bot", show_alert=True)
 
-    # ----- ADMIN BUTTONS -----
+    # 🔐 OPEN ADMIN PANEL (OWNER ONLY)
+    if q.data == "open_admin" and uid == OWNER_ID:
+        return await q.message.reply_text(
+            "🔐 Admin Panel",
+            reply_markup=admin_menu()
+        )
+
+    # ----- ADMIN ACTIONS -----
     if uid == OWNER_ID:
         if q.data == "admin_add":
             admin_state[uid] = "add"
-            return await q.message.reply_text("🆔 User ID likh kar bhejo")
+            return await q.message.reply_text("🆔 User ID bhejo")
 
         if q.data == "admin_remove":
             admin_state[uid] = "remove"
-            return await q.message.reply_text("🆔 User ID likh kar bhejo")
+            return await q.message.reply_text("🆔 User ID bhejo")
 
         if q.data == "admin_list":
             users = db_list()
@@ -119,11 +126,15 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "👥 Allowed Users:\n" + ("\n".join(users) if users else "None")
             )
 
+        # ⬅ BACK → PANEL COMPLETELY GONE
         if q.data == "admin_back":
-            return await q.message.reply_text("⬅ Back")
+            admin_state.pop(uid, None)
+            await q.message.delete()
+            return
 
     return await orig_buttons(update, ctx)
 
+# ================= TEXT =================
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     txt = update.message.text.strip()
@@ -137,6 +148,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("❌ Valid numeric User ID bhejo")
 
         target = int(txt)
+
         if admin_state[uid] == "add":
             db_add(target)
             msg = "✅ User access added"
@@ -149,6 +161,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     return await orig_text(update, ctx)
 
+# ================= FILE =================
 async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_allowed(uid):
@@ -174,10 +187,9 @@ if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    print("🚀 Bot running with Admin Panel + PostgreSQL + Flask")
+    print("🚀 Bot running with Inline Admin Panel")
     app.run_polling()
