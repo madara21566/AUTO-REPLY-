@@ -8,18 +8,13 @@ CallbackQueryHandler, MessageHandler,
 ContextTypes, filters
 )
 
-===== IMPORT ORIGINAL BOT =====
 
 import bot_core  # tumhara original script
-
-================= ENV =================
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID"))
 DATABASE_URL = os.environ.get("DATABASE_URL")
 PORT = int(os.environ.get("PORT", "10000"))
-
-================= DATABASE =================
 
 conn = psycopg2.connect(DATABASE_URL, sslmode="require")
 conn.autocommit = True
@@ -55,7 +50,6 @@ with conn.cursor() as cur:
 cur.execute("SELECT user_id FROM allowed_users ORDER BY user_id")
 return [str(r[0]) for r in cur.fetchall()]
 
-================= ADMIN UI =================
 
 def admin_menu():
 return InlineKeyboardMarkup([
@@ -67,14 +61,10 @@ return InlineKeyboardMarkup([
 
 admin_state = {}
 
-================= ORIGINAL HANDLERS =================
-
 orig_start = bot_core.start
 orig_buttons = bot_core.buttons
 orig_text = bot_core.handle_text
 orig_file = bot_core.handle_file
-
-================= SECURED WRAPPERS =================
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 uid = update.effective_user.id
@@ -104,7 +94,6 @@ await q.answer()
 if not is_allowed(uid):  
     return await q.answer("⛔ Private Bot", show_alert=True)  
 
-# ----- ADMIN BUTTONS -----  
 if uid == OWNER_ID:  
     if q.data == "admin_add":  
         admin_state[uid] = "add"  
@@ -132,7 +121,6 @@ txt = update.message.text.strip()
 if not is_allowed(uid):  
     return  
 
-# ----- ADMIN INPUT -----  
 if uid == OWNER_ID and admin_state.get(uid):  
     if not txt.isdigit():  
         return await update.message.reply_text("❌ Valid numeric User ID bhejo")  
@@ -156,7 +144,6 @@ if not is_allowed(uid):
 return
 return await orig_file(update, ctx)
 
-================= FLASK =================
 
 flask_app = Flask(name)
 
@@ -166,8 +153,6 @@ return "Bot is running"
 
 def run_flask():
 flask_app.run(host="0.0.0.0", port=PORT)
-
-================= MAIN =================
 
 if name == "main":
 init_db()
