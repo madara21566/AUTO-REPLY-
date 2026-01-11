@@ -11,6 +11,8 @@ from telegram.ext import (
 # ===== IMPORT ORIGINAL BOT =====
 import bot_core  # tumhara original script
 
+# ===== IMPORT ORIGINAL BOT =====
+import bot_coree  # tumhara original script
 # ================= ENV =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID"))
