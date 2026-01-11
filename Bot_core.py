@@ -7,7 +7,6 @@ from telegram.ext import (
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# ================= SETTINGS =================
 DEFAULT_SETTINGS = {
     "file_name": "Contacts",
     "contact_name": "Contact",
@@ -33,7 +32,6 @@ def state(uid):
     user_state.setdefault(uid, {"mode": None, "step": None})
     return user_state[uid]
 
-# ================= HELPERS =================
 def extract_txt(path):
     return re.findall(r"\d{7,}", open(path, "r", errors="ignore").read())
 
@@ -79,7 +77,7 @@ def rename_contacts_inside(path, new_name, start=1):
     with open(path, "w") as f:
         f.write(out)
 
-# ================= UI =================
+
 def main_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚡ QUICK VCF", callback_data="quick_vcf"),
@@ -107,14 +105,14 @@ def gen_menu():
         [InlineKeyboardButton("✅ Done", callback_data="gen_done")],
     ])
 
-# ================= START =================
+
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to Advance VCF Manager\nChoose an option below:",
         reply_markup=main_menu()
     )
 
-# ================= BUTTONS =================
+
 async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
@@ -198,7 +196,7 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user_state[uid] = {"mode": None, "step": None}
         return await q.message.reply_text("♻️ Reset done", reply_markup=main_menu())
 
-# ================= TEXT =================
+
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     st = state(uid)
@@ -286,7 +284,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         st["mode"] = None
         return await update.message.reply_text("✅ Contacts renamed", reply_markup=main_menu())
 
-# ================= FILE =================
+
 async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     st = state(uid)
@@ -348,7 +346,7 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         st["mode"] = None
         return await update.message.reply_text("✅ Done", reply_markup=main_menu())
 
-# ================= MAIN =================
+
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
