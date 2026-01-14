@@ -1,4 +1,4 @@
-import os, threading, asyncio
+import os, threading
 from datetime import datetime, timedelta
 
 import psycopg2
@@ -32,7 +32,8 @@ def init_db():
             trial_end TIMESTAMP,
             trial_used BOOLEAN DEFAULT FALSE,
             is_premium BOOLEAN DEFAULT FALSE,
-            temp_access_until TIMESTAMP
+            temp_access_until TIMESTAMP,
+            reminder_sent BOOLEAN DEFAULT FALSE
         );
         """)
 
@@ -61,7 +62,7 @@ def is_allowed(uid):
         start_trial(uid)
         return True
 
-    _, _, trial_end, trial_used, is_premium, temp_until = user
+    _, _, trial_end, trial_used, is_premium, temp_until, _ = user
 
     if is_premium:
         return True
@@ -74,7 +75,7 @@ def is_allowed(uid):
 
     return False
 
-# ===== UI HELPERS =====
+# ===== UI =====
 def premium_button():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💎 Buy Premium", url="https://t.me/MADARAXHEREE")],
@@ -103,8 +104,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if user and not user[4] and user[2] and datetime.utcnow() > user[2]:
         return await update.message.reply_text(
-            "❌ *Trial Expired*\n\n"
-            "Premium lene ke liye niche button dabaye 👇",
+            "❌ *Trial Expired*\n\nPremium lene ke liye 👇",
             reply_markup=premium_button(),
             parse_mode="Markdown"
         )
@@ -122,8 +122,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "👋 Welcome!\n\n"
-        "Aapko *24 hour FREE trial* mila hai 🎁\n\n"
-        "Status check karne ke liye niche button dabaye 👇",
+        "🎁 *24 Hour FREE Trial Activated*\n\n"
+        "Status check karne ke liye 👇",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📊 My Status", callback_data="check_status")]
         ]),
@@ -138,7 +138,7 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = q.from_user.id
     await q.answer()
 
-    # ----- STATUS -----
+    # STATUS
     if q.data == "check_status":
         user = get_user(uid)
         now = datetime.utcnow()
@@ -149,7 +149,7 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not user:
             return await q.message.reply_text("❌ No data")
 
-        _, _, trial_end, trial_used, is_premium, temp_until = user
+        _, _, trial_end, trial_used, is_premium, temp_until, _ = user
 
         if is_premium:
             return await q.message.reply_text("💎 Premium Active")
@@ -174,13 +174,13 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     reply_markup=premium_button()
                 )
 
-    # ----- ADMIN -----
+    # ADMIN
     if q.data == "open_admin" and uid == OWNER_ID:
         return await q.message.reply_text("🔐 Admin Panel", reply_markup=admin_menu())
 
     if q.data == "admin_temp" and uid == OWNER_ID:
         return await q.message.reply_text(
-            "Select Temp Access:",
+            "Select Temporary Access:",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("1 Hour", callback_data="temp_1h")],
                 [InlineKeyboardButton("1 Day", callback_data="temp_1d")],
@@ -235,29 +235,41 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     return await orig_file(update, ctx)
 
-# ===== TRIAL REMINDER =====
-async def trial_reminder(app):
-    while True:
-        await asyncio.sleep(600)
-        now = datetime.utcnow()
-        with conn.cursor() as cur:
-            cur.execute("""
-            SELECT user_id, trial_end FROM user_access
-            WHERE is_premium=FALSE AND trial_used=TRUE
-            """)
-            for uid, trial_end in cur.fetchall():
-                if trial_end and 3500 <= (trial_end - now).total_seconds() <= 3600:
-                    try:
-                        await app.bot.send_message(
-                            uid,
-                            "⏰ Trial Ending Soon!\n\nUpgrade now 👇",
-                            reply_markup=premium_button()
-                        )
-                    except:
-                        pass
+# ===== TRIAL REMINDER (JOB QUEUE SAFE) =====
+async def trial_reminder_job(ctx: ContextTypes.DEFAULT_TYPE):
+    now = datetime.utcnow()
+
+    with conn.cursor() as cur:
+        cur.execute("""
+        SELECT user_id, trial_end FROM user_access
+        WHERE is_premium=FALSE AND trial_used=TRUE AND reminder_sent=FALSE
+        """)
+        users = cur.fetchall()
+
+    for uid, trial_end in users:
+        if not trial_end:
+            continue
+
+        remaining = (trial_end - now).total_seconds()
+        if 3500 <= remaining <= 3600:
+            try:
+                await ctx.bot.send_message(
+                    uid,
+                    "⏰ *Trial Ending Soon!*\n\nUpgrade now 👇",
+                    reply_markup=premium_button(),
+                    parse_mode="Markdown"
+                )
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE user_access SET reminder_sent=TRUE WHERE user_id=%s",
+                        (uid,)
+                    )
+            except:
+                pass
 
 # ===== FLASK =====
 flask_app = Flask(__name__)
+
 @flask_app.route("/")
 def home():
     return "Bot Running"
@@ -268,15 +280,21 @@ def run_flask():
 # ===== MAIN =====
 if __name__ == "__main__":
     init_db()
+
     threading.Thread(target=run_flask, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    app.create_task(trial_reminder(app))
+    app.job_queue.run_repeating(
+        trial_reminder_job,
+        interval=600,
+        first=30
+    )
 
     print("🚀 BOT RUNNING")
     app.run_polling()
