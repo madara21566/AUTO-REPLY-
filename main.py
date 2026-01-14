@@ -1,25 +1,34 @@
-import os, threading
+import os
+import threading
+import time
 from datetime import datetime, timedelta
 
 import psycopg2
 from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler,
-    CallbackQueryHandler, MessageHandler,
-    ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
 )
 
-# ===== ORIGINAL BOT (SAFE) =====
+# ================= ORIGINAL BOT =================
 import bot_core
 
-# ===== ENV =====
+# ================= ENV =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID"))
 DATABASE_URL = os.environ.get("DATABASE_URL")
 PORT = int(os.environ.get("PORT", "10000"))
 
-# ===== DATABASE =====
+# ================= DATABASE =================
 conn = psycopg2.connect(DATABASE_URL, sslmode="require")
 conn.autocommit = True
 
@@ -75,7 +84,7 @@ def is_allowed(uid):
 
     return False
 
-# ===== UI =====
+# ================= UI =================
 def premium_button():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💎 Buy Premium", url="https://t.me/MADARAXHEREE")],
@@ -85,19 +94,18 @@ def premium_button():
 def admin_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⏱ Temp Access", callback_data="admin_temp")],
-        [InlineKeyboardButton("📋 List Users", callback_data="admin_list")],
         [InlineKeyboardButton("⬅ Back", callback_data="admin_back")]
     ])
 
 admin_state = {}
 
-# ===== ORIGINAL HANDLERS =====
+# ================= ORIGINAL HANDLERS =================
 orig_start = bot_core.start
 orig_buttons = bot_core.buttons
 orig_text = bot_core.handle_text
 orig_file = bot_core.handle_file
 
-# ===== START =====
+# ================= START =================
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user = get_user(uid)
@@ -121,9 +129,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
     await update.message.reply_text(
-        "👋 Welcome!\n\n"
-        "🎁 *24 Hour FREE Trial Activated*\n\n"
-        "Status check karne ke liye 👇",
+        "👋 Welcome!\n\n🎁 *24 Hour FREE Trial Activated*\n\n👇",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📊 My Status", callback_data="check_status")]
         ]),
@@ -132,7 +138,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     return await orig_start(update, ctx)
 
-# ===== BUTTONS =====
+# ================= BUTTONS =================
 async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     uid = q.from_user.id
@@ -194,7 +200,7 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     return await orig_buttons(update, ctx)
 
-# ===== TEXT =====
+# ================= TEXT =================
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     txt = update.message.text.strip()
@@ -229,45 +235,49 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     return await orig_text(update, ctx)
 
-# ===== FILE =====
+# ================= FILE =================
 async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
     return await orig_file(update, ctx)
 
-# ===== TRIAL REMINDER (JOB QUEUE SAFE) =====
-async def trial_reminder_job(ctx: ContextTypes.DEFAULT_TYPE):
-    now = datetime.utcnow()
+# ================= TRIAL REMINDER THREAD =================
+def trial_reminder_loop(app):
+    while True:
+        time.sleep(600)
+        now = datetime.utcnow()
 
-    with conn.cursor() as cur:
-        cur.execute("""
-        SELECT user_id, trial_end FROM user_access
-        WHERE is_premium=FALSE AND trial_used=TRUE AND reminder_sent=FALSE
-        """)
-        users = cur.fetchall()
+        with conn.cursor() as cur:
+            cur.execute("""
+            SELECT user_id, trial_end FROM user_access
+            WHERE is_premium=FALSE
+              AND trial_used=TRUE
+              AND reminder_sent=FALSE
+            """)
+            users = cur.fetchall()
 
-    for uid, trial_end in users:
-        if not trial_end:
-            continue
+        for uid, trial_end in users:
+            if not trial_end:
+                continue
 
-        remaining = (trial_end - now).total_seconds()
-        if 3500 <= remaining <= 3600:
-            try:
-                await ctx.bot.send_message(
-                    uid,
-                    "⏰ *Trial Ending Soon!*\n\nUpgrade now 👇",
-                    reply_markup=premium_button(),
-                    parse_mode="Markdown"
-                )
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE user_access SET reminder_sent=TRUE WHERE user_id=%s",
-                        (uid,)
+            remaining = (trial_end - now).total_seconds()
+            if 3500 <= remaining <= 3600:
+                try:
+                    app.bot.send_message(
+                        chat_id=uid,
+                        text="⏰ Trial ending in 1 hour!\n\nBuy premium 👇",
+                        reply_markup=premium_button(),
+                        parse_mode="Markdown"
                     )
-            except:
-                pass
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE user_access SET reminder_sent=TRUE WHERE user_id=%s",
+                            (uid,)
+                        )
+                except:
+                    pass
 
-# ===== FLASK =====
+# ================= FLASK =================
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -277,7 +287,7 @@ def home():
 def run_flask():
     flask_app.run("0.0.0.0", PORT)
 
-# ===== MAIN =====
+# ================= MAIN =================
 if __name__ == "__main__":
     init_db()
 
@@ -290,11 +300,12 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    app.job_queue.run_repeating(
-        trial_reminder_job,
-        interval=600,
-        first=30
-    )
+    # ✅ BACKGROUND REMINDER (RENDER SAFE)
+    threading.Thread(
+        target=trial_reminder_loop,
+        args=(app,),
+        daemon=True
+    ).start()
 
-    print("🚀 BOT RUNNING")
+    print("🚀 BOT RUNNING (FINAL)")
     app.run_polling()
