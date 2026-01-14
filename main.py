@@ -1,22 +1,13 @@
-import os
-import threading
-import time
+import os, threading, time
 from datetime import datetime, timedelta
 
 import psycopg2
 from flask import Flask
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
+    ApplicationBuilder, CommandHandler,
+    CallbackQueryHandler, MessageHandler,
+    ContextTypes, filters
 )
 
 # ================= ORIGINAL BOT =================
@@ -51,35 +42,49 @@ def get_user(uid):
         cur.execute("SELECT * FROM user_access WHERE user_id=%s", (uid,))
         return cur.fetchone()
 
+def ensure_user(uid):
+    with conn.cursor() as cur:
+        cur.execute("""
+        INSERT INTO user_access (user_id)
+        VALUES (%s)
+        ON CONFLICT DO NOTHING
+        """, (uid,))
+
 def start_trial(uid):
     now = datetime.utcnow()
     with conn.cursor() as cur:
         cur.execute("""
-        INSERT INTO user_access (user_id, trial_start, trial_end, trial_used)
-        VALUES (%s, %s, %s, TRUE)
-        ON CONFLICT DO NOTHING
-        """, (uid, now, now + timedelta(hours=24)))
+        UPDATE user_access
+        SET trial_start=%s,
+            trial_end=%s,
+            trial_used=TRUE
+        WHERE user_id=%s AND trial_used=FALSE
+        """, (now, now + timedelta(hours=24), uid))
 
 def is_allowed(uid):
     if uid == OWNER_ID:
         return True
 
+    ensure_user(uid)
     user = get_user(uid)
     now = datetime.utcnow()
 
-    if not user:
-        start_trial(uid)
-        return True
-
     _, _, trial_end, trial_used, is_premium, temp_until, _ = user
 
+    # 💎 Premium
     if is_premium:
         return True
 
+    # ⏱ Temp Access
     if temp_until and now <= temp_until:
         return True
 
-    if trial_used and trial_end and now <= trial_end:
+    # 🎁 Trial (auto-start)
+    if not trial_used:
+        start_trial(uid)
+        return True
+
+    if trial_end and now <= trial_end:
         return True
 
     return False
@@ -93,6 +98,9 @@ def premium_button():
 
 def admin_menu():
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Add Premium", callback_data="admin_add")],
+        [InlineKeyboardButton("➖ Remove Premium", callback_data="admin_remove")],
+        [InlineKeyboardButton("📋 List Users", callback_data="admin_list")],
         [InlineKeyboardButton("⏱ Temp Access", callback_data="admin_temp")],
         [InlineKeyboardButton("⬅ Back", callback_data="admin_back")]
     ])
@@ -108,17 +116,12 @@ orig_file = bot_core.handle_file
 # ================= START =================
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    user = get_user(uid)
-
-    if user and not user[4] and user[2] and datetime.utcnow() > user[2]:
-        return await update.message.reply_text(
-            "❌ *Trial Expired*\n\nPremium lene ke liye 👇",
-            reply_markup=premium_button(),
-            parse_mode="Markdown"
-        )
 
     if not is_allowed(uid):
-        return
+        return await update.message.reply_text(
+            "❌ Trial Expired\n\nBuy premium 👇",
+            reply_markup=premium_button()
+        )
 
     if uid == OWNER_ID:
         await update.message.reply_text(
@@ -129,7 +132,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
     await update.message.reply_text(
-        "👋 Welcome!\n\n🎁 *24 Hour FREE Trial Activated*\n\n👇",
+        "👋 Welcome!\n\n🎁 *24 Hour FREE Trial Activated*",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📊 My Status", callback_data="check_status")]
         ]),
@@ -144,49 +147,42 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = q.from_user.id
     await q.answer()
 
-    # STATUS
+    if q.data == "open_admin" and uid == OWNER_ID:
+        return await q.message.reply_text("🔐 Admin Panel", reply_markup=admin_menu())
+
+    # -------- STATUS --------
     if q.data == "check_status":
         user = get_user(uid)
         now = datetime.utcnow()
 
-        if uid == OWNER_ID:
-            return await q.message.reply_text("👑 Owner – Unlimited Access")
-
-        if not user:
-            return await q.message.reply_text("❌ No data")
-
         _, _, trial_end, trial_used, is_premium, temp_until, _ = user
+
+        if uid == OWNER_ID:
+            return await q.message.reply_text("👑 Owner – Unlimited")
 
         if is_premium:
             return await q.message.reply_text("💎 Premium Active")
 
         if temp_until and now <= temp_until:
-            left = temp_until - now
             return await q.message.reply_text(
-                f"⏱ Temporary Access\nTime Left: {left.seconds//3600}h"
+                f"⏱ Temp Access\nExpires in {(temp_until-now).seconds//3600}h"
             )
 
-        if trial_used and trial_end:
-            if now <= trial_end:
-                left = trial_end - now
-                return await q.message.reply_text(
-                    f"⏳ Trial Active\n"
-                    f"Time Left: {left.seconds//3600}h {left.seconds%3600//60}m",
-                    reply_markup=premium_button()
-                )
-            else:
-                return await q.message.reply_text(
-                    "❌ Trial Expired",
-                    reply_markup=premium_button()
-                )
+        if trial_end and now <= trial_end:
+            return await q.message.reply_text(
+                f"⏳ Trial Active\nEnds in {(trial_end-now).seconds//3600}h",
+                reply_markup=premium_button()
+            )
 
-    # ADMIN
-    if q.data == "open_admin" and uid == OWNER_ID:
-        return await q.message.reply_text("🔐 Admin Panel", reply_markup=admin_menu())
+        return await q.message.reply_text(
+            "❌ Trial Expired",
+            reply_markup=premium_button()
+        )
 
+    # -------- ADMIN TEMP --------
     if q.data == "admin_temp" and uid == OWNER_ID:
         return await q.message.reply_text(
-            "Select Temporary Access:",
+            "Select duration:",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("1 Hour", callback_data="temp_1h")],
                 [InlineKeyboardButton("1 Day", callback_data="temp_1d")],
@@ -205,11 +201,13 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     txt = update.message.text.strip()
 
+    # ---- TEMP ACCESS APPLY ----
     if uid == OWNER_ID and uid in admin_state:
         if not txt.isdigit():
             return await update.message.reply_text("❌ Valid User ID")
 
         target = int(txt)
+        ensure_user(target)
         now = datetime.utcnow()
 
         if admin_state[uid] == "temp_1h":
@@ -220,12 +218,10 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             until = now + timedelta(days=30)
 
         with conn.cursor() as cur:
-            cur.execute("""
-            INSERT INTO user_access (user_id, temp_access_until)
-            VALUES (%s, %s)
-            ON CONFLICT (user_id)
-            DO UPDATE SET temp_access_until = EXCLUDED.temp_access_until
-            """, (target, until))
+            cur.execute(
+                "UPDATE user_access SET temp_access_until=%s WHERE user_id=%s",
+                (until, target)
+            )
 
         admin_state.pop(uid)
         return await update.message.reply_text("✅ Temporary Access Granted")
@@ -241,7 +237,7 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     return await orig_file(update, ctx)
 
-# ================= TRIAL REMINDER THREAD =================
+# ================= TRIAL REMINDER =================
 def trial_reminder_loop(app):
     while True:
         time.sleep(600)
@@ -250,24 +246,17 @@ def trial_reminder_loop(app):
         with conn.cursor() as cur:
             cur.execute("""
             SELECT user_id, trial_end FROM user_access
-            WHERE is_premium=FALSE
-              AND trial_used=TRUE
-              AND reminder_sent=FALSE
+            WHERE reminder_sent=FALSE AND trial_end IS NOT NULL
             """)
             users = cur.fetchall()
 
         for uid, trial_end in users:
-            if not trial_end:
-                continue
-
-            remaining = (trial_end - now).total_seconds()
-            if 3500 <= remaining <= 3600:
+            if trial_end and 3500 <= (trial_end-now).total_seconds() <= 3600:
                 try:
                     app.bot.send_message(
-                        chat_id=uid,
-                        text="⏰ Trial ending in 1 hour!\n\nBuy premium 👇",
-                        reply_markup=premium_button(),
-                        parse_mode="Markdown"
+                        uid,
+                        "⏰ Trial ending in 1 hour!\n\nBuy premium 👇",
+                        reply_markup=premium_button()
                     )
                     with conn.cursor() as cur:
                         cur.execute(
@@ -300,12 +289,11 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    # ✅ BACKGROUND REMINDER (RENDER SAFE)
     threading.Thread(
         target=trial_reminder_loop,
         args=(app,),
         daemon=True
     ).start()
 
-    print("🚀 BOT RUNNING (FINAL)")
+    print("🚀 BOT RUNNING (FIXED)")
     app.run_polling()
