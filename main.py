@@ -78,7 +78,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "📂💾 *VCF Bot Access*\n"
             "Want my *VCF Converter Bot*?\n"
             "Just DM me anytime — I’ll reply fast!\n\n"
-            "📩 @MADARAXHEREE\n\n"
+            "📩 os.environ.get("USERNAME")\n\n"
             "⚡ TXT ⇄ VCF | 🪄 Easy | 🔒 Trusted",
             parse_mode="Markdown"
         )
