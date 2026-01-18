@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 
 # ================= ORIGINAL BOT =================
-import bot_core  # ❗ tumhara original bot (unchanged)
+import bot_core   # ❗ tumhara original bot (unchanged)
 
 orig_start = bot_core.start
 orig_buttons = bot_core.buttons
@@ -58,10 +58,10 @@ def is_allowed(uid):
     data = get_user(uid)
     if not data:
         return False
-    expires = data[0]
-    if expires is None:
+    exp = data[0]
+    if exp is None:
         return True
-    return datetime.utcnow() < expires
+    return datetime.utcnow() < exp
 
 def give_trial(uid):
     with conn.cursor() as cur:
@@ -84,12 +84,15 @@ def remove_user(uid):
     with conn.cursor() as cur:
         cur.execute("DELETE FROM users WHERE user_id=%s", (uid,))
 
-# ================= CHANNEL CHECK =================
+# ================= CHANNEL CHECK (JOIN REQUEST SUPPORTED) =================
 async def joined_channels(bot, uid):
     try:
-        ok = ["member", "administrator", "creator"]
         m1 = await bot.get_chat_member(CHANNEL_1_ID, uid)
         m2 = await bot.get_chat_member(CHANNEL_2_ID, uid)
+
+        # member + admin + creator + join request (restricted)
+        ok = ["member", "administrator", "creator", "restricted"]
+
         return m1.status in ok and m2.status in ok
     except:
         return False
@@ -98,7 +101,18 @@ async def joined_channels(bot, uid):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
-    # ✅ ACCESS → ORIGINAL BOT
+    # 👑 OWNER → ADMIN PANEL ALWAYS
+    if uid == OWNER_ID:
+        await update.message.reply_text(
+            "👑 *Owner Mode Active*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔐 Admin Panel", callback_data="open_admin")]
+            ])
+        )
+        return await orig_start(update, ctx)
+
+    # ✅ NORMAL ALLOWED USER
     if is_allowed(uid):
         return await orig_start(update, ctx)
 
@@ -118,8 +132,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🔐 *Bot Locked*\n\n"
-        "Bot use karne ke liye dono channels join karo\n"
-        "Join request bhejne ke baad *Continue* dabao",
+        "Dono channels me join request bhejo\n"
+        "Uske baad *Continue* dabao",
         parse_mode="Markdown",
         reply_markup=kb
     )
@@ -127,24 +141,22 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ================= ADMIN =================
 admin_state = {}
 
-async def admin_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
-        return
-
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Add Permanent", callback_data="admin_add")],
-        [InlineKeyboardButton("➖ Remove User", callback_data="admin_remove")],
-        [InlineKeyboardButton("📋 List Users", callback_data="admin_list")]
-    ])
-    await update.message.reply_text("🔐 Admin Panel", reply_markup=kb)
-
 # ================= BUTTONS =================
 async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     uid = q.from_user.id
     await q.answer()
 
-    # ===== CONTINUE =====
+    # 🔐 OPEN ADMIN PANEL
+    if q.data == "open_admin" and uid == OWNER_ID:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Add Permanent", callback_data="admin_add")],
+            [InlineKeyboardButton("➖ Remove User", callback_data="admin_remove")],
+            [InlineKeyboardButton("📋 List Users", callback_data="admin_list")]
+        ])
+        return await q.message.reply_text("🔐 Admin Panel", reply_markup=kb)
+
+    # ✅ CONTINUE BUTTON
     if q.data == "check_join":
         user = get_user(uid)
         if user and user[2]:
@@ -156,17 +168,21 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "🎉 *24 HOURS FREE TRIAL ACTIVATED!*",
                 parse_mode="Markdown"
             )
-        return await q.answer("Join both channels first", show_alert=True)
 
-    # ===== ADMIN =====
+        return await q.answer(
+            "❌ Dono channels me join request bhejo",
+            show_alert=True
+        )
+
+    # 👑 ADMIN ACTIONS
     if uid == OWNER_ID:
         if q.data == "admin_add":
             admin_state[uid] = "add"
-            return await q.message.reply_text("Send User ID")
+            return await q.message.reply_text("🆔 User ID bhejo")
 
         if q.data == "admin_remove":
             admin_state[uid] = "remove"
-            return await q.message.reply_text("Send User ID")
+            return await q.message.reply_text("🆔 User ID bhejo")
 
         if q.data == "admin_list":
             with conn.cursor() as cur:
@@ -179,9 +195,10 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             text = "👥 Users:\n"
             for u, e in rows:
                 text += f"{u} → {'PERMANENT' if e is None else e}\n"
+
             return await q.message.reply_text(text)
 
-    # ✅ ORIGINAL BOT BUTTONS
+    # 🔁 ORIGINAL BOT BUTTONS
     return await orig_buttons(update, ctx)
 
 # ================= TEXT =================
@@ -189,10 +206,10 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     txt = update.message.text.strip()
 
-    # ADMIN INPUT
+    # 👑 ADMIN INPUT
     if uid == OWNER_ID and uid in admin_state:
         if not txt.isdigit():
-            return await update.message.reply_text("Invalid ID")
+            return await update.message.reply_text("❌ Valid User ID bhejo")
 
         target = int(txt)
         action = admin_state.pop(uid)
@@ -205,6 +222,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             remove_user(target)
             return await update.message.reply_text("❌ User removed")
 
+    # 🚫 BLOCKED USER
     if not is_allowed(uid):
         return
 
@@ -219,7 +237,7 @@ async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ================= TRIAL WARNING =================
 async def trial_watcher(app):
     while True:
-        await asyncio.sleep(300)
+        await asyncio.sleep(300)  # every 5 min
         with conn.cursor() as cur:
             cur.execute("""
             SELECT user_id, expires_at FROM users
@@ -263,10 +281,9 @@ if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin_cmd))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    print("🚀 FINAL BOT RUNNING (bot_core + trial + force join)")
+    print("🚀 FINAL BOT RUNNING (ALL FEATURES WORKING)")
     app.run_polling()
