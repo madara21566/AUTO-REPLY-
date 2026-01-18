@@ -10,13 +10,15 @@ from telegram.ext import (
 )
 
 # ================= ENV =================
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-OWNER_ID = int(os.environ.get("OWNER_ID"))
-DATABASE_URL = os.environ.get("DATABASE_URL")
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+OWNER_ID = int(os.environ["OWNER_ID"])
+DATABASE_URL = os.environ["DATABASE_URL"]
 PORT = int(os.environ.get("PORT", "10000"))
 
-CHANNEL_1 = int(os.environ.get("CHANNEL_1"))
-CHANNEL_2 = int(os.environ.get("CHANNEL_2"))
+CHANNEL_1_ID = int(os.environ["CHANNEL_1_ID"])
+CHANNEL_2_ID = int(os.environ["CHANNEL_2_ID"])
+CHANNEL_1_LINK = os.environ["CHANNEL_1_LINK"]
+CHANNEL_2_LINK = os.environ["CHANNEL_2_LINK"]
 
 # ================= DB =================
 conn = psycopg2.connect(DATABASE_URL, sslmode="require")
@@ -33,7 +35,7 @@ def init_db():
         );
         """)
 
-# ================= USER HELPERS =================
+# ================= HELPERS =================
 def get_user(uid):
     with conn.cursor() as cur:
         cur.execute(
@@ -45,16 +47,13 @@ def get_user(uid):
 def is_allowed(uid):
     if uid == OWNER_ID:
         return True
-
     data = get_user(uid)
     if not data:
         return False
-
-    expires_at = data[0]
-    if expires_at is None:
+    expires = data[0]
+    if expires is None:
         return True
-
-    return datetime.utcnow() < expires_at
+    return datetime.utcnow() < expires
 
 def give_trial(uid):
     with conn.cursor() as cur:
@@ -81,8 +80,8 @@ def remove_user(uid):
 async def joined_channels(bot, uid):
     try:
         ok = ["member", "administrator", "creator"]
-        m1 = await bot.get_chat_member(CHANNEL_1, uid)
-        m2 = await bot.get_chat_member(CHANNEL_2, uid)
+        m1 = await bot.get_chat_member(CHANNEL_1_ID, uid)
+        m2 = await bot.get_chat_member(CHANNEL_2_ID, uid)
         return m1.status in ok and m2.status in ok
     except:
         return False
@@ -101,8 +100,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔗 Join Channel 1", url="https://t.me/yourchannel1")],
-        [InlineKeyboardButton("🔗 Join Channel 2", url="https://t.me/yourchannel2")],
+        [InlineKeyboardButton("🔗 Join Channel 1", url=CHANNEL_1_LINK)],
+        [InlineKeyboardButton("🔗 Join Channel 2", url=CHANNEL_2_LINK)],
         [InlineKeyboardButton("✅ Continue", callback_data="check_join")]
     ])
 
@@ -120,9 +119,8 @@ admin_state = {}
 async def admin_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
-
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Add Permanent User", callback_data="admin_add")],
+        [InlineKeyboardButton("➕ Add Permanent", callback_data="admin_add")],
         [InlineKeyboardButton("➖ Remove User", callback_data="admin_remove")],
         [InlineKeyboardButton("📋 List Users", callback_data="admin_list")]
     ])
@@ -134,41 +132,31 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = q.from_user.id
     await q.answer()
 
-    # ===== CONTINUE =====
     if q.data == "check_join":
         user = get_user(uid)
         if user and user[2]:
-            return await q.message.reply_text(
-                "❌ Trial already used.\nContact admin."
-            )
-
+            return await q.message.reply_text("❌ Trial already used.")
         if await joined_channels(ctx.bot, uid):
             give_trial(uid)
             return await q.message.reply_text(
-                "🎉 *24 HOURS FREE TRIAL ACTIVATED!*\n\n"
-                "⏰ Trial valid for next 24 hours",
+                "🎉 *24 HOURS FREE TRIAL ACTIVATED!*",
                 parse_mode="Markdown"
             )
         return await q.answer("Join both channels first", show_alert=True)
 
-    # ===== ADMIN =====
     if uid == OWNER_ID:
         if q.data == "admin_add":
             admin_state[uid] = "add"
-            return await q.message.reply_text("🆔 Send User ID")
-
+            return await q.message.reply_text("Send User ID")
         if q.data == "admin_remove":
             admin_state[uid] = "remove"
-            return await q.message.reply_text("🆔 Send User ID")
-
+            return await q.message.reply_text("Send User ID")
         if q.data == "admin_list":
             with conn.cursor() as cur:
                 cur.execute("SELECT user_id, expires_at FROM users")
                 rows = cur.fetchall()
-
             if not rows:
                 return await q.message.reply_text("No users")
-
             text = "👥 Users:\n"
             for u, e in rows:
                 text += f"{u} → {'PERMANENT' if e is None else e}\n"
@@ -181,15 +169,12 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if uid == OWNER_ID and uid in admin_state:
         if not txt.isdigit():
-            return await update.message.reply_text("❌ Invalid ID")
-
+            return await update.message.reply_text("Invalid ID")
         target = int(txt)
         action = admin_state.pop(uid)
-
         if action == "add":
             add_permanent(target)
             return await update.message.reply_text("✅ Permanent access added")
-
         if action == "remove":
             remove_user(target)
             return await update.message.reply_text("❌ User removed")
@@ -200,7 +185,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ================= TRIAL WARNING =================
 async def trial_watcher(app):
     while True:
-        await asyncio.sleep(300)  # 5 min
+        await asyncio.sleep(300)
         with conn.cursor() as cur:
             cur.execute("""
             SELECT user_id, expires_at FROM users
@@ -213,8 +198,7 @@ async def trial_watcher(app):
                 try:
                     await app.bot.send_message(
                         uid,
-                        "⚠️ *Your free trial will expire in 1 hour!*",
-                        parse_mode="Markdown"
+                        "⚠️ Trial will expire in 1 hour!"
                     )
                     with conn.cursor() as cur:
                         cur.execute(
@@ -226,7 +210,6 @@ async def trial_watcher(app):
 
 # ================= FLASK =================
 flask_app = Flask(__name__)
-
 @flask_app.route("/")
 def home():
     return "Bot running"
@@ -249,5 +232,5 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print("🚀 Bot running (stable, no JobQueue)")
+    print("🚀 Bot running fully automated")
     app.run_polling()
