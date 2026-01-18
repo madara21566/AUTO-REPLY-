@@ -9,6 +9,14 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
+# ================= ORIGINAL BOT =================
+import bot_core  # ❗ tumhara original bot (unchanged)
+
+orig_start = bot_core.start
+orig_buttons = bot_core.buttons
+orig_text = bot_core.handle_text
+orig_file = bot_core.handle_file
+
 # ================= ENV =================
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 OWNER_ID = int(os.environ["OWNER_ID"])
@@ -90,15 +98,18 @@ async def joined_channels(bot, uid):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
+    # ✅ ACCESS → ORIGINAL BOT
     if is_allowed(uid):
-        return await update.message.reply_text("✅ Access granted 🚀")
+        return await orig_start(update, ctx)
 
+    # 🚫 TRIAL ALREADY USED
     user = get_user(uid)
     if user and user[2]:
         return await update.message.reply_text(
             "⛔ Free trial already used.\nContact admin for access."
         )
 
+    # 🔐 FORCE JOIN
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔗 Join Channel 1", url=CHANNEL_1_LINK)],
         [InlineKeyboardButton("🔗 Join Channel 2", url=CHANNEL_2_LINK)],
@@ -119,6 +130,7 @@ admin_state = {}
 async def admin_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
+
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("➕ Add Permanent", callback_data="admin_add")],
         [InlineKeyboardButton("➖ Remove User", callback_data="admin_remove")],
@@ -132,10 +144,12 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = q.from_user.id
     await q.answer()
 
+    # ===== CONTINUE =====
     if q.data == "check_join":
         user = get_user(uid)
         if user and user[2]:
             return await q.message.reply_text("❌ Trial already used.")
+
         if await joined_channels(ctx.bot, uid):
             give_trial(uid)
             return await q.message.reply_text(
@@ -144,43 +158,63 @@ async def buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         return await q.answer("Join both channels first", show_alert=True)
 
+    # ===== ADMIN =====
     if uid == OWNER_ID:
         if q.data == "admin_add":
             admin_state[uid] = "add"
             return await q.message.reply_text("Send User ID")
+
         if q.data == "admin_remove":
             admin_state[uid] = "remove"
             return await q.message.reply_text("Send User ID")
+
         if q.data == "admin_list":
             with conn.cursor() as cur:
                 cur.execute("SELECT user_id, expires_at FROM users")
                 rows = cur.fetchall()
+
             if not rows:
                 return await q.message.reply_text("No users")
+
             text = "👥 Users:\n"
             for u, e in rows:
                 text += f"{u} → {'PERMANENT' if e is None else e}\n"
             return await q.message.reply_text(text)
+
+    # ✅ ORIGINAL BOT BUTTONS
+    return await orig_buttons(update, ctx)
 
 # ================= TEXT =================
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     txt = update.message.text.strip()
 
+    # ADMIN INPUT
     if uid == OWNER_ID and uid in admin_state:
         if not txt.isdigit():
             return await update.message.reply_text("Invalid ID")
+
         target = int(txt)
         action = admin_state.pop(uid)
+
         if action == "add":
             add_permanent(target)
             return await update.message.reply_text("✅ Permanent access added")
+
         if action == "remove":
             remove_user(target)
             return await update.message.reply_text("❌ User removed")
 
     if not is_allowed(uid):
-        return await update.message.reply_text("⛔ Access denied")
+        return
+
+    return await orig_text(update, ctx)
+
+# ================= FILE =================
+async def handle_file(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    return await orig_file(update, ctx)
 
 # ================= TRIAL WARNING =================
 async def trial_watcher(app):
@@ -210,6 +244,7 @@ async def trial_watcher(app):
 
 # ================= FLASK =================
 flask_app = Flask(__name__)
+
 @flask_app.route("/")
 def home():
     return "Bot running"
@@ -231,6 +266,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("admin", admin_cmd))
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
 
-    print("🚀 Bot running fully automated")
+    print("🚀 FINAL BOT RUNNING (bot_core + trial + force join)")
     app.run_polling()
