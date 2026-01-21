@@ -19,3 +19,4 @@ pandas
 httpx
 psycopg2-binary
 gunicorn
+phonenumbers
