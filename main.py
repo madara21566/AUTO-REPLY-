@@ -10,11 +10,7 @@ from telegram.ext import (
 )
 
 # ===== IMPORT ORIGINAL BOT =====
-try:
-    import bot_core
-except ImportError:
-    print("❌ Error: bot_core.py not found!")
-    exit()
+import bot_core
 
 # ================= CONFIGURATION =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
