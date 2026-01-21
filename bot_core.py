@@ -169,19 +169,19 @@ def main_menu():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📂 FILE ANALYSIS", callback_data="analysis"),
-            InlineKeyboardButton("🔄 CONVERTER", callback_data="converter")
+            InlineKeyboardButton("🔄 FILE CONVERTER", callback_data="converter")
         ],
         [
             InlineKeyboardButton("⚡ QUICK VCF", callback_data="quick_vcf"),
-            InlineKeyboardButton("📇 PRO GENERATOR", callback_data="gen")
+            InlineKeyboardButton("📇 VCF GENERATOR", callback_data="gen")
         ],
         [
             InlineKeyboardButton("✂️ SPLIT VCF", callback_data="split_vcf"),
             InlineKeyboardButton("🧩 MERGE FILES", callback_data="merge")
         ],
         [
-            InlineKeyboardButton("🛠️ EDITOR", callback_data="vcf_editor"),
-            InlineKeyboardButton("📝 NAME MAKER", callback_data="name_gen")
+            InlineKeyboardButton("🛠️ FILE EDITOR", callback_data="vcf_editor"),
+            InlineKeyboardButton("📝 NAME GENERATE", callback_data="name_gen")
         ],
         [
             InlineKeyboardButton("✏️ RENAME FILE", callback_data="rename_files"),
@@ -198,7 +198,7 @@ def back_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 MAIN MENU", callback_data="main_menu")]])
 
 def cancel_kb():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ CANCEL OPERATION", callback_data="main_menu")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ CANCEL ", callback_data="main_menu")]])
 
 def convert_kb():
     return InlineKeyboardMarkup([
